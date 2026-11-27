@@ -76,6 +76,20 @@ export class PostScriptError extends Error {
   }
 }
 
+// A step cap: undefined or null is no cap (0, the default), as is 0 itself, the
+// way `pscat --max-steps 0` is. Anything else must be a whole number up to
+// 2^53 - 1, the largest stepsUsed can count exactly. Checked here, not left to
+// the module: its f64 argument would turn true into 1 and '100' into 100, and
+// wrap nothing it should refuse.
+function stepCap(name, value) {
+  if (value === undefined || value === null) return 0;
+  if (typeof value !== 'number') throw new TypeError(`pscat: ${name} must be a number, got ${typeof value}`);
+  if (!Number.isInteger(value) || value < 0 || value > Number.MAX_SAFE_INTEGER) {
+    throw new RangeError(`pscat: ${name} must be a whole number from 0 to ${Number.MAX_SAFE_INTEGER} (0 is no limit), got ${value}`);
+  }
+  return value;
+}
+
 function pageOf(options = {}) {
   const width = options.width ?? DEFAULT_PAGE.width;
   const height = options.height ?? DEFAULT_PAGE.height;
@@ -102,6 +116,7 @@ function pageOf(options = {}) {
   return {
     width,
     height,
+    maxSteps: stepCap('maxSteps', options.maxSteps),
     scale: dpi / 72,
     record: {
       svg: options.svg === true,
@@ -140,10 +155,13 @@ export class Renderer {
     if (typeof source !== 'string' && !(source instanceof Uint8Array)) {
       throw new TypeError('pscat: the program must be a string or a Uint8Array');
     }
-    const { width, height, scale, record } = pageOf(options);
+    const { width, height, maxSteps, scale, record } = pageOf(options);
     this.#record = { svg: false, pdf: false };
     this.#ps.begin(source, width, height, scale, record);
     this.#record = record;
+    // Always armed, 0 when the option is absent: the module keeps the last cap
+    // for every later program, so an earlier program's cap must not carry over.
+    this.#ps.maxSteps = maxSteps;
   }
 
   /**
@@ -170,12 +188,29 @@ export class Renderer {
    */
   *frames(source, options = {}) {
     const budget = options.budget ?? 5000;
+    const frameMaxSteps = stepCap('frameMaxSteps', options.frameMaxSteps);
+    if (frameMaxSteps > 0 && stepCap('maxSteps', options.maxSteps) > 0) {
+      // Re-arming the cap each frame restarts its count, so the two cannot both hold.
+      throw new TypeError('pscat: frameMaxSteps replaces maxSteps (it re-arms the cap every frame); give one');
+    }
     this.begin(source, options);
     for (let n = 0; ; n++) {
+      if (frameMaxSteps > 0) this.#ps.maxSteps = frameMaxSteps;
       const more = this.step(budget);
       yield n;
       if (!more) return;
     }
+  }
+
+  /**
+   * Steps run since the cap was last armed: begin() (the whole program, under
+   * `maxSteps`) or the start of the latest frame (under `frameMaxSteps`).
+   * Counted only while a cap is set, so it reads 0 without one, and 0 before
+   * begin(). It trails the true figure by up to a slice of a few thousand, and
+   * stays readable after a PostScriptError, a `limitexceeded` one included.
+   */
+  get stepsUsed() {
+    return this.#ps.stepsUsed;
   }
 
   /** Page width in device pixels. */

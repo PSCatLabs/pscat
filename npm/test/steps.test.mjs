@@ -106,9 +106,9 @@ test('the cap is off by default and one render never leaks into the next', async
 
 test('stepsUsed stays readable after an ordinary PostScript error, counted under a cap', async () => {
   const r = await createRenderer();
-  assert.throws(() => r.render('1 2 3 add add add pop pop bogus', { ...page, maxSteps: 1000 }), { errorName: 'undefined' });
+  assert.throws(() => r.render('1 2 add pop bogus', { ...page, maxSteps: 1000 }), { errorName: 'undefined' });
   assert.ok(r.stepsUsed > 0 && r.stepsUsed < 1000, `stepsUsed ${r.stepsUsed}`);
-  assert.throws(() => r.render('1 2 3 add add add pop pop bogus', page), { errorName: 'undefined' });
+  assert.throws(() => r.render('1 2 add pop bogus', page), { errorName: 'undefined' });
   assert.equal(r.stepsUsed, 0, 'uncounted without a cap');
   // 0 before begin() on a fresh renderer, and a step() before begin() fails without touching it.
   const fresh = await createRenderer();

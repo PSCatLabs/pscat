@@ -177,6 +177,40 @@ r.warnings; // the same list, also readable during a step() run; a PostScriptErr
 Names that no pack has (a typo, say) fall back to Helvetica without a note,
 as Ghostscript does.
 
+## Limiting a run
+
+A program can loop forever, or hand one operator a decompression bomb. The
+module has no clock, so the only limit it can enforce is a count of steps (the
+objects executed, the loop passes, and one step per KiB a decode filter
+produces, as `pscat --max-steps` counts them). It is off by default.
+
+```js
+try {
+  r.render(source, { maxSteps: 50_000_000 });     // the whole program
+} catch (e) {
+  if (e instanceof PostScriptError && e.errorName === 'limitexceeded') {
+    console.log('stopped after', r.stepsUsed, 'steps'); // at least the cap
+  }
+}
+```
+
+- **`maxSteps` caps the whole program** (`render`, `begin`, `frames`): 0, `null`
+  or no value is no limit. It is a whole number from 0 to 2^53 - 1; anything
+  else throws `RangeError` (`TypeError` for a non-number) before the run starts.
+  Every `begin` sets it afresh, so a cap on one program never carries into the
+  next. Over it the run throws `PostScriptError` (`errorName` `'limitexceeded'`,
+  `limitexceeded (steps)` in the report); the page drawn so far survives.
+- **`frameMaxSteps` caps each frame of `frames()`**, the way the site's
+  playground does (500,000 steps a frame). The count restarts every frame, so a
+  long program runs while no one `step(budget)` call is over the cap: that call is
+  what freezes a tab, and a whole-program cap that lets a heavy piece finish
+  (hundreds of millions of steps) lets a bomb drain for hours. It replaces
+  `maxSteps` (give one; both is a `TypeError`).
+- **`stepsUsed`** is the count since the cap was armed: the whole program under
+  `maxSteps`, the latest frame under `frameMaxSteps`. It counts only while a cap
+  is set (0 without one), trails the true figure by up to a few thousand, and
+  stays readable after an error.
+
 ## API
 
 | | |
@@ -185,7 +219,8 @@ as Ghostscript does.
 | `render(source, { width, height, dpi, svg, pdf, svgText, pdfText }?)` | Run a program to completion on a fresh page and return `{ width, height, data, output, warnings }`. `source` is a string or a `Uint8Array`. The page is in points (default 612x792, US Letter) at `dpi` (default 72, one pixel per point). `svg: true` / `pdf: true` also record it as SVG / PDF; `svgText: true` (with `svg`) writes Helvetica, Times and Courier text as selectable SVG `<text>` instead of glyph outlines, like `pscat --svg-text`; `pdf: true` writes text as selectable, searchable PDF text in embedded subset fonts (a face given to `addFont` is embedded too), like `pscat --pdf`; `pdfText: false` (with `pdf`) draws glyph outlines instead, like `pscat --text-as-paths`. |
 | `begin(source, options?)` | Queue a program on a fresh page. |
 | `step(budget = 5000)` | Run up to `budget` objects. Returns `true` while there is more to do. |
-| `frames(source, { budget, ...page }?)` | A generator of `begin` plus one `step` per iteration. |
+| `frames(source, { budget, frameMaxSteps, ...page }?)` | A generator of `begin` plus one `step` per iteration. `frameMaxSteps: N` caps the steps of each frame instead of the whole program. |
+| `stepsUsed` | Steps run since the cap was last armed (`begin`, or the latest frame under `frameMaxSteps`). 0 when no cap is set. Readable after an error. |
 | `width`, `height` | The page size in pixels. |
 | `output` | What the program has printed since `begin`. |
 | `pixels()` | A copy of the page as RGBA bytes. |

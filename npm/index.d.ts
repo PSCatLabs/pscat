@@ -48,11 +48,39 @@ export interface PageOptions {
    * outline, as `pscat --text-as-paths` does. Default true.
    */
   pdfText?: boolean;
+  /**
+   * Cap on the steps the whole program may run, counted from begin(): objects
+   * executed, loop passes, and a step per KiB a decode filter produces, as
+   * `pscat --max-steps` counts them. Over it the run throws a PostScriptError
+   * with errorName 'limitexceeded' and `limitexceeded (steps)` in its report;
+   * the page drawn so far and the renderer survive. 0, null or undefined is no
+   * limit, the default, and every begin() sets it afresh, so one program's cap
+   * never carries into the next. A whole number, 0 to 2^53 - 1; anything else
+   * throws RangeError (a non-number throws TypeError).
+   *
+   * The module has no clock, so a step cap is the only limit that stops an
+   * endless loop, or one operator draining a decompression bomb, in a call to
+   * render() or step(). It is a bound on work, not a deadline: a step takes
+   * microseconds, except a bomb's, which take about 11 us a KiB. To bound each
+   * frame of a stepped page instead of the whole program, see
+   * FrameOptions.frameMaxSteps.
+   */
+  maxSteps?: number | null;
 }
 
 export interface FrameOptions extends PageOptions {
   /** Objects executed per frame. Default 5000. */
   budget?: number;
+  /**
+   * Cap on the steps each frame (each step(budget) call) may run, re-armed
+   * before every frame so the count restarts: a program of any length passes
+   * while no one frame is over it. This is what keeps a tab responsive, since
+   * the work that freezes it is one call, and it is how the site's playground
+   * bounds a frame (500,000 steps). Same values and errors as `maxSteps`,
+   * which it replaces: give one or the other (TypeError otherwise).
+   * stepsUsed then reads the latest frame's count.
+   */
+  frameMaxSteps?: number | null;
 }
 
 /** A rendered page. `data` is RGBA, row by row from the top, the ImageData layout. */
@@ -128,6 +156,14 @@ export class Renderer {
   readonly output: string;
   /** Font substitution notes since begin(), as in RenderResult.warnings. */
   readonly warnings: string[];
+  /**
+   * Steps run since the cap was last armed: begin() under `maxSteps`, or the
+   * start of the latest frame under `frameMaxSteps`. Counted only while a cap
+   * is set (0 without one) and 0 before begin(); it trails the true figure by
+   * up to a slice of a few thousand. Readable after a PostScriptError, a
+   * `limitexceeded` one included, where it is at least the cap.
+   */
+  readonly stepsUsed: number;
   /** A copy of the page as RGBA bytes. */
   pixels(): Uint8ClampedArray;
   /** The page as width, height, RGBA data, output and warnings. */
