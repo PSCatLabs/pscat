@@ -66,6 +66,8 @@ fn child() {
     }
     a.run_str("e (F) writestring f (\\n) writestring")
         .expect("a3 end");
+    // Dropped while it holds a partial line: its `Drop` sends it.
+    a.run_str("f (tail) writestring").expect("tail");
     drop(a);
     raw(END);
 }
@@ -110,5 +112,10 @@ fn another_interpreter_never_moves_the_owners_line() {
         .position(|w| w == END)
         .expect("the child's end mark");
     let got = &all[start..end];
-    assert_eq!(got, b"Ea1x\nc\nFa3\n", "{:?}", String::from_utf8_lossy(got));
+    assert_eq!(
+        got,
+        b"Ea1x\nc\nFa3\ntail",
+        "{:?}",
+        String::from_utf8_lossy(got)
+    );
 }

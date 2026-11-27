@@ -179,7 +179,20 @@ path's.
   datagram socket block as before.
 - Several interpreters in one process writing to one stdout: only the
   owner of the line buffer keeps std's flush points; the others write
-  straight through.
+  straight through. Another interpreter counts as a second writer: it can
+  fill the room the owner's end-of-run check saw, and the owner's `Drop` then
+  waits for the reader, as std's flush would. The timed path does not hold
+  std's stdout lock, so another thread's line can land between the pieces of
+  a long timed write. An owner whose limits are taken off between runs sends
+  its partial line at its next (plain) write, earlier than std would; an
+  owner dropped after a failed send gives up the buffer and leaves the bytes
+  for the next writer and the CLI's last flush.
+- The end-of-run room check reads the room exactly where the system says it
+  (a macOS pipe from `fstat`; a Linux pipe from `F_GETPIPE_SZ` less
+  `FIONREAD`, since `poll` calls a pipe full while its last page still takes
+  a small write; a Linux socket from `SIOCOUTQ` against `SO_SNDBUF`) and
+  otherwise assumes room: on a macOS socket it cannot tell, so the exit flush
+  there may wait on a full socket, as without a limit.
 - Sending the buffer at the CLI's flush points and in the owner's `Drop`
   waits for the reader as std's flush does; the end-of-run check has made
   sure it has room for those at most 1024 bytes, for a single writer.

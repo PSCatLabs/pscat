@@ -187,7 +187,7 @@ pub(crate) fn write_all(
         }
         let n = match kind {
             FdKind::Fifo => match fifo_room(fd) {
-                Room::Free(free) => rest.len().min(free),
+                Room::Free(free, _) => rest.len().min(free),
                 Room::Grows => rest.len().min(libc::PIPE_BUF),
                 Room::Unknown | Room::Full => match wait_writable(fd) {
                     // Linux: a writable pipe has a free page slot.
@@ -291,8 +291,10 @@ const SEND_FLAGS: libc::c_int = 0;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 #[derive(PartialEq, Eq, Debug)]
 enum Room {
-    /// This many bytes are free: a write of no more returns at once.
-    Free(usize),
+    /// This many bytes are free: a write of no more returns at once. The
+    /// flag: the pipe can still grow, so a bigger write does not block
+    /// either.
+    Free(usize, bool),
     /// Full, but smaller than the most a pipe grows to: a small write makes
     /// the kernel grow it, as a plain write would (macOS starts a pipe at
     /// 16 KiB and grows it to 64 KiB on a write that does not fit; `poll`
@@ -325,7 +327,7 @@ fn fifo_room(fd: libc::c_int) -> Room {
         return Room::Unknown;
     }
     match size - held {
-        free if free > 0 => Room::Free(usize::try_from(free).unwrap_or(0)),
+        free if free > 0 => Room::Free(usize::try_from(free).unwrap_or(0), size < MACOS_BIG_PIPE),
         _ if size < MACOS_BIG_PIPE => Room::Grows,
         _ => Room::Full,
     }
@@ -377,18 +379,88 @@ fn wait_writable(fd: libc::c_int) -> Ready {
     poll_out(fd, POLL_MS)
 }
 
-/// Whether `fd` takes `n` bytes now without blocking (`n` no more than
-/// std's stdout buffer, which every writable pipe and stream socket has).
+/// Whether a plain write of `n` bytes (no more than std's stdout buffer)
+/// would return without waiting, for the end-of-run check. "No" only where
+/// the system says the write would block; where it cannot say exactly, the
+/// answer leans to "yes", which leaves the bytes to the exit flush as
+/// without a limit.
+///
+/// - macOS pipe: `fstat`'s free room, exact, or below 64 KiB (a write that
+///   does not fit grows it).
+/// - Linux pipe: writable by `poll` (a free page slot), or the free bytes
+///   (`F_GETPIPE_SZ` less `FIONREAD`) hold `n`: `poll` alone calls a pipe
+///   full while its last page still takes a small write.
+/// - Linux stream socket: writable by `poll`, or the queued bytes
+///   (`SIOCOUTQ`) are under the send buffer (`SO_SNDBUF`), where a send
+///   still goes in: `poll` calls a Unix socket writable only while at most a
+///   quarter of the buffer is used.
+/// - macOS stream socket: nothing on the writing end says how much its peer
+///   takes (`POLLOUT` needs 2048 bytes free; a 1024-byte send fits in less),
+///   so always "yes": the exit flush may then wait on a full socket, as
+///   without a limit.
 fn has_room(fd: libc::c_int, kind: FdKind, n: usize) -> bool {
-    if kind == FdKind::Fifo {
-        match fifo_room(fd) {
-            Room::Free(free) => return free >= n,
-            Room::Grows => return true,
-            Room::Full => return poll_out(fd, 0) == Ready::Hangup,
-            Room::Unknown => {}
-        }
+    if poll_out(fd, 0) != Ready::NotYet {
+        // Writable, hung up (the write fails at once) or not pollable.
+        return match fifo_room(fd) {
+            Room::Free(free, grows) if kind == FdKind::Fifo => grows || free >= n,
+            _ => true,
+        };
     }
-    poll_out(fd, 0) != Ready::NotYet
+    match kind {
+        FdKind::Fifo => match fifo_room(fd) {
+            Room::Free(free, grows) => grows || free >= n,
+            Room::Grows => true,
+            Room::Full => false,
+            Room::Unknown => linux_pipe_free(fd).is_none_or(|free| free >= n),
+        },
+        FdKind::Socket => linux_socket_has_room(fd).unwrap_or(true),
+        FdKind::Blocking => true,
+    }
+}
+
+/// A Linux pipe's free bytes: its size less what it holds.
+#[cfg(target_os = "linux")]
+fn linux_pipe_free(fd: libc::c_int) -> Option<usize> {
+    // SAFETY: `fcntl` with no argument; `ioctl` writes one `c_int`.
+    let size = unsafe { libc::fcntl(fd, libc::F_GETPIPE_SZ) };
+    let mut held: libc::c_int = 0;
+    let r = unsafe { libc::ioctl(fd, libc::FIONREAD, &mut held) };
+    if size < 0 || r != 0 || held < 0 {
+        return None;
+    }
+    Some((size as usize).saturating_sub(held as usize))
+}
+
+#[cfg(not(target_os = "linux"))]
+fn linux_pipe_free(_fd: libc::c_int) -> Option<usize> {
+    None
+}
+
+/// Whether a Linux stream socket's send queue is under its send buffer.
+/// `None` elsewhere, or when the system does not say.
+#[cfg(target_os = "linux")]
+fn linux_socket_has_room(fd: libc::c_int) -> Option<bool> {
+    let mut queued: libc::c_int = 0;
+    // SAFETY: `ioctl` writes one `c_int`; `getsockopt` one `c_int` and its
+    // length.
+    let r = unsafe { libc::ioctl(fd, libc::TIOCOUTQ, &mut queued) };
+    let mut sndbuf: libc::c_int = 0;
+    let mut len = std::mem::size_of::<libc::c_int>() as libc::socklen_t;
+    let s = unsafe {
+        libc::getsockopt(
+            fd,
+            libc::SOL_SOCKET,
+            libc::SO_SNDBUF,
+            (&mut sndbuf as *mut libc::c_int).cast(),
+            &mut len,
+        )
+    };
+    (r == 0 && s == 0).then_some(queued < sndbuf)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn linux_socket_has_room(_fd: libc::c_int) -> Option<bool> {
+    None
 }
 
 // ---------------------------------------------------------------------
@@ -607,7 +679,7 @@ impl LineOut<'_, '_> {
 /// `only` limits it to one owner (`Drop`, the plain path); `None` sends
 /// whatever is there (the CLI, which runs one interpreter).
 pub(crate) fn send_line(only: Option<u64>) -> std::io::Result<()> {
-    if OWNER.load(Ordering::Relaxed) == 0 || only.is_some_and(|id| !owned_by(id)) {
+    if only.is_some_and(|id| !owned_by(id)) {
         return Ok(());
     }
     let mut line = lock_line();
@@ -632,6 +704,20 @@ pub(crate) fn send_line(only: Option<u64>) -> std::io::Result<()> {
     };
     settle(&mut line);
     r
+}
+
+/// Give up `id`'s ownership of the line buffer (its `Drop`, after a send
+/// that failed): the bytes stay, for the CLI's last flush to report, and the
+/// next interpreter to write claims them with the buffer.
+pub(crate) fn release(id: u64) {
+    if !owned_by(id) {
+        return;
+    }
+    let mut line = lock_line();
+    if line.owner == id {
+        line.owner = 0;
+        OWNER.store(0, Ordering::Relaxed);
+    }
 }
 
 /// At the end of a run under a time limit, with bytes of `id`'s in the line
@@ -777,6 +863,66 @@ mod tests {
             }) => assert_eq!(e.kind(), std::io::ErrorKind::BrokenPipe),
             other => panic!("{other:?}"),
         }
+    }
+
+    fn set_nonblocking(fd: libc::c_int) {
+        // SAFETY: flag change on a descriptor this test owns alone.
+        unsafe {
+            let flags = libc::fcntl(fd, libc::F_GETFL);
+            libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK);
+        }
+    }
+
+    /// Whether a plain write of `n` bytes would wait: a non-blocking one is
+    /// refused (`EAGAIN`) or takes only part of it (a blocking one would then
+    /// wait for the rest).
+    fn would_block(fd: libc::c_int, n: usize) -> bool {
+        let data = vec![b'#'; n];
+        // SAFETY: a write of a live buffer.
+        let r = unsafe { libc::write(fd, data.as_ptr().cast(), n) };
+        r < 0 || (r as usize) < n
+    }
+
+    /// Fill `fd` (non-blocking, owned by the test) in steps; whenever
+    /// `has_room` says no, a write of that size must really be refused.
+    fn room_is_never_denied_wrongly(fd: libc::c_int, kind: FdKind) {
+        set_nonblocking(fd);
+        let chunk = vec![b'#'; 700];
+        for _ in 0..400 {
+            for n in [1, 100, 1024] {
+                if !has_room(fd, kind, n) {
+                    assert!(
+                        would_block(fd, n),
+                        "{kind:?}: no room said for {n} bytes that fit"
+                    );
+                }
+            }
+            // SAFETY: a write of a live buffer.
+            if unsafe { libc::write(fd, chunk.as_ptr().cast(), chunk.len()) } < 0 {
+                break;
+            }
+        }
+    }
+
+    #[test]
+    fn the_end_of_run_check_never_denies_room_that_is_there() {
+        let (_reader, writer) = std::io::pipe().expect("pipe");
+        room_is_never_denied_wrongly(writer.as_raw_fd(), FdKind::Fifo);
+        let (_a, b) = std::os::unix::net::UnixStream::pair().expect("socket pair");
+        room_is_never_denied_wrongly(b.as_raw_fd(), FdKind::Socket);
+        // The Linux state `poll` miscounts: 15 full pages and part of a 16th.
+        let (_reader, writer) = std::io::pipe().expect("pipe");
+        let fd = writer.as_raw_fd();
+        set_nonblocking(fd);
+        let page = vec![b'#'; 4096];
+        for _ in 0..15 {
+            // SAFETY: a write of a live buffer.
+            assert_eq!(unsafe { libc::write(fd, page.as_ptr().cast(), 4096) }, 4096);
+        }
+        // SAFETY: as above.
+        assert_eq!(unsafe { libc::write(fd, page.as_ptr().cast(), 3000) }, 3000);
+        assert!(has_room(fd, FdKind::Fifo, 1024), "a 1024-byte write fits");
+        assert!(!would_block(fd, 1024));
     }
 
     #[test]

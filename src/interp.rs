@@ -5323,7 +5323,10 @@ impl Drop for Interp {
         // bytes are not touched. A failure keeps them for the CLI's last
         // flush to report.
         #[cfg(unix)]
-        let _ = crate::timed_write::send_line(Some(self.host_id));
+        {
+            let _ = crate::timed_write::send_line(Some(self.host_id));
+            crate::timed_write::release(self.host_id);
+        }
         if self.keep_dicts_on_drop {
             return;
         }
