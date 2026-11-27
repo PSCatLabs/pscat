@@ -1497,8 +1497,15 @@ impl Interp {
         };
         // `--profile-ops` times every operator, in its own copy of the loop
         // (checked once per slice, so the plain loop carries no per-step test).
+        // `--lint` samples the operand stack after every step in another copy
+        // (#1366); the profile wins when both are on.
         let mut result = if self.profile.as_deref().is_some_and(|p| p.ops_on()) {
             self.step_n_timed(budget)
+        } else if self.stack_trace.is_some() {
+            let result = self.step_n_traced(budget);
+            // The last step of the slice ran after the last sample.
+            self.note_stack_step(false);
+            result
         } else {
             self.step_n_inner(budget)
         };
@@ -1949,7 +1956,8 @@ impl Interp {
         self.execute_resolved(resolved, id)
     }
 
-    // `step_n_timed` is a copy of this loop (`--profile-ops`): change both.
+    // `step_n_timed` (`--profile-ops`) and `step_n_traced` (`--lint`) are copies
+    // of this loop: change all three.
     fn step_n_inner(&mut self, budget: usize) -> Result<bool, PsError> {
         // An explicit count of the steps left, so a fused run of several
         // elements (#864) can charge each of them.
@@ -1968,6 +1976,71 @@ impl Interp {
             // loop iteration (or a frame finishing) leaves a procedure on
             // top: its first element runs in this same step, as it always
             // has.
+            let done = match self.proc_step::<false>() {
+                ProcStep::Op(func) => self.run_op(func, ""),
+                ProcStep::Name(id) => self.execute_name(id),
+                ProcStep::Src => self.proc_source(),
+                ProcStep::Pushed | ProcStep::Lit => continue,
+                ProcStep::Other => match self.next_item() {
+                    Ok(None) => {
+                        // The pass that finds the program done runs no
+                        // object: not a step (#1213).
+                        self.slice_left += 1;
+                        return Ok(false);
+                    }
+                    Ok(Some(Item::Obj(obj))) => self.execute_element(obj),
+                    Ok(Some(Item::Proc)) => match self.proc_step::<false>() {
+                        ProcStep::Op(func) => self.run_op(func, ""),
+                        ProcStep::Name(id) => self.execute_name(id),
+                        ProcStep::Src => self.proc_source(),
+                        // `Other`: a run of empty loop iterations paused
+                        // with no procedure on top (#900), a step that
+                        // did nothing.
+                        ProcStep::Pushed | ProcStep::Lit | ProcStep::Other => continue,
+                    },
+                    Err(e) => {
+                        // A scan/syntax error short-circuits out of
+                        // next_item before any Action ran, so the failing
+                        // Scanner frame is still on top with its line set.
+                        self.sync_scan_line();
+                        self.recover(e)?;
+                        continue;
+                    }
+                },
+            };
+            if let Err(e) = done {
+                self.recover(e)?;
+            }
+        }
+        Ok(!self.estack.is_empty())
+    }
+
+    /// [`step_n_inner`](Self::step_n_inner) with the operand stack sampled
+    /// before every step, for `--lint`'s `[stack-leak]` line (#1366: the
+    /// element that left the item, not the loop or call that ran it). Kept as
+    /// a copy for the reason `step_n_timed` is: the plain loop stays exactly
+    /// as the compiler had it, and a run that does not lint pays one check per
+    /// slice. Fusing and the step count are the plain loop's.
+    #[inline(never)]
+    fn step_n_traced(&mut self, budget: usize) -> Result<bool, PsError> {
+        // An explicit count of the steps left, so a fused run of several
+        // elements (#864) can charge each of them.
+        self.slice_left = budget;
+        self.slice_budget = budget;
+        while self.slice_left > 0 {
+            self.slice_left -= 1;
+            if self.quit_requested {
+                // Nothing ran: not a step (#1213).
+                self.slice_left += 1;
+                return Ok(false);
+            }
+            // A procedure element (nearly every step of a bound library)
+            // is dispatched straight from the frame. Anything else goes
+            // through `next_item`, which hands back `Item::Proc` when a
+            // loop iteration (or a frame finishing) leaves a procedure on
+            // top: its first element runs in this same step, as it always
+            // has.
+            self.note_stack_step(true);
             let done = match self.proc_step::<false>() {
                 ProcStep::Op(func) => self.run_op(func, ""),
                 ProcStep::Name(id) => self.execute_name(id),
@@ -3922,20 +3995,90 @@ impl Interp {
 
     /// The line (and `run` file) of the last source token scanned: what ran
     /// most recently, so the end-of-program stack is attributed to it.
-    pub(crate) fn last_scan_location(&self) -> (Option<usize>, Option<&Rc<str>>) {
-        (self.last_line, self.last_file.as_ref())
+    pub(crate) fn last_scan_at(&self) -> crate::lint::ScanAt<'_> {
+        crate::lint::ScanAt {
+            line: self.last_line,
+            run: self.last_file.as_ref(),
+            main: self.main_file_name.as_ref(),
+        }
     }
 
-    /// Record the depth the previous token left, at the next token's
-    /// boundary: `last_line` is still the previous token's, and the
-    /// scanner has not been advanced past this token yet. The stack here
-    /// is the result of everything before it, loops and calls included,
-    /// since their frames sit above the scanner and are gone by now.
+    /// The table of where procedure bodies were written (#1405), which the
+    /// `[stack-leak]` finding reads to name an element's own line.
+    pub(crate) fn body_lines(&self) -> std::cell::Ref<'_, crate::srcpos::BodyLines> {
+        self.source_lines.borrow()
+    }
+
+    /// Record what the previous token left, at the next token's boundary:
+    /// `last_line` is still the previous token's, and the scanner has not
+    /// been advanced past this token yet. The stack here is the result of
+    /// everything before it, loops and calls included, since their frames sit
+    /// above the scanner and are gone by now.
     #[inline(never)]
     fn note_stack_depth(&mut self) {
         if let Some(trace) = self.stack_trace.as_mut() {
-            trace.note(&self.ostack, self.last_line, self.last_file.as_ref());
+            let at = crate::lint::ScanAt {
+                line: self.last_line,
+                run: self.last_file.as_ref(),
+                main: self.main_file_name.as_ref(),
+            };
+            trace.note(&self.ostack, at);
         }
+    }
+
+    /// After a step of a run that traces stack leaks (#1366): note how low
+    /// the operand stack has been since the last token boundary, and which
+    /// procedure element pushed the item just above that point, so
+    /// [`note_stack_depth`](Self::note_stack_depth) can credit what a token
+    /// left to the element that left it, not only to the token. With `next`,
+    /// the top frame's element is the one about to run: a procedure's at its
+    /// `pc`, or, for a loop frame, the first element of its body (a guess the
+    /// next sample checks, since the step that starts an iteration runs that
+    /// element in the same step).
+    ///
+    /// Constant work per step, nothing looked up or allocated.
+    #[inline(always)]
+    fn note_stack_step(&mut self, next: bool) {
+        let Interp {
+            stack_trace,
+            ostack,
+            estack,
+            ..
+        } = self;
+        let Some(trace) = stack_trace.as_deref_mut() else {
+            return;
+        };
+        trace.step(ostack.len(), |t| {
+            use crate::lint::TopFrame;
+            let top = match estack.last() {
+                Some(Frame::Proc { body, pc }) => TopFrame::Proc {
+                    key: body.storage_site(0).0,
+                    pc: *pc,
+                    before: pc.checked_sub(1).map_or((0, 0), |p| body.storage_site(p)),
+                },
+                Some(
+                    Frame::Repeat { body, .. }
+                    | Frame::Loop { body }
+                    | Frame::For { body, .. }
+                    | Frame::Forall { body, .. },
+                ) => TopFrame::Loop {
+                    key: body.storage_site(0).0,
+                },
+                _ => TopFrame::None,
+            };
+            t.ran(top, estack.len())
+        });
+        let (site, tentative) = match estack.last() {
+            Some(Frame::Proc { body, pc }) if next => (body.storage_site(*pc), false),
+            Some(
+                Frame::Repeat { body, .. }
+                | Frame::Loop { body }
+                | Frame::For { body, .. }
+                | Frame::Forall { body, .. },
+            ) if next => (body.storage_site(0), true),
+            _ => ((0, 0), false),
+        };
+        trace.set_pending(site, tentative, estack.len());
     }
 
     pub(crate) fn shadow_trace(&self) -> Option<&crate::lint::ShadowTrace> {

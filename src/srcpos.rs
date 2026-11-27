@@ -542,6 +542,25 @@ impl BodyLines {
         })
     }
 
+    /// The line and source name of the element at `site`, a
+    /// [`PsArray::storage_site`]: what the stack-leak trace kept of the
+    /// element that ran, without holding the body (#1366). The name is as in
+    /// [`position`](Self::position): a `run` file's, or the main program's when
+    /// the host named it. `None` when the body has no entry (or it was swept
+    /// since). A swept body's address could be taken by a body scanned later,
+    /// which would give a wrong line of a real source: the worst a message
+    /// can suffer.
+    pub(crate) fn position_at(&self, site: (usize, usize)) -> Option<(u32, Option<&Rc<str>>)> {
+        let (key, at) = site;
+        let (t, e) = [&self.anon, &self.named]
+            .into_iter()
+            .find_map(|t| t.entries.get(&key).map(|e| (t, e)))?;
+        Some((
+            t.line(e, at),
+            self.source_of(e).and_then(|s| s.name.as_ref()),
+        ))
+    }
+
     /// The line (and `run` file) element `i` of `body` was written on, as
     /// the lint reports it.
     pub(crate) fn line_of(&self, body: &PsArray, i: usize) -> Option<(u32, Option<Rc<str>>)> {
