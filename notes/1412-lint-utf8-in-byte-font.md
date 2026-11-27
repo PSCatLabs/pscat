@@ -37,8 +37,22 @@ read: a re-encoded font still gets bytes.
 It reads the font live at the start of the show; a `kshow` proc that switches
 font mid-string is not followed.
 
-**Corpus.** See the PR: head `--lint` over every tracked `.ps`/`.eps` and every
-`postscript` block in the Markdown docs.
+**Corpus (head `--lint` over all 264 tracked `.ps`/`.eps` files and 115
+`postscript` blocks in the Markdown docs).** Two hits, both real bugs, both in
+committed art: `examples/dataviz_paper.ps` and `gallery/mochi_denim_blue.ps`
+show an em dash (UTF-8 `\342\200\224`) in the TeX Gyre Pagella pack face, which draws three
+wrong glyphs. Fixing them changes renders (tier b), so they are a follow-up,
+not part of this change; no gate lints them (`selftest.sh` lints only
+`selftest/drivers/`), so nothing goes red. No hit in `lib/` or a driver.
 
-**Not done.** `psanim check` and pscat-mcp see it only if they call
-`Interp::trace_utf8_text()` (pscat-mcp runs `--lint`, so it gets it already).
+**Render identity.** Two binaries (base `f6286a7b`, head), 173 files (every
+tracked `examples/`, `gallery/` and `selftest/drivers/` file), 212 pages
+byte-identical, 4 files failing identically in both trees skipped; again with
+`--pscat-args "--lint"` so the tracing path itself is exercised. The control
+is a `/probe` marker in the base tree's `lib/artkit.ps`: the change is only
+visible under `--lint`, so no render can tell the binaries apart.
+
+**Not done.** `psanim check` and other embedders that build an `Interp`
+themselves see the finding only if they call the doc(hidden)
+`Interp::trace_utf8_text()`; the CLI `--lint`, `--bands --lint` and the
+`pscat mcp` server (which runs `--lint`) get it already. Type 3 fonts.
