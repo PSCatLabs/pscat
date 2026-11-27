@@ -1503,12 +1503,25 @@ mod tests {
     fn leak_message(src: &str) -> String {
         let mut it = Interp::with_page(50, 50).expect("page");
         it.trace_stack_leaks();
-        let _ = it.run_str(src);
+        it.run_str(src).expect("the program runs");
         check(&it, true)
             .into_iter()
             .find(|f| f.check == "stack-leak")
             .map(|f| f.message)
             .unwrap_or_default()
+    }
+
+    /// The line `[stack-leak]` names for the oldest item.
+    fn leak_line(src: &str) -> usize {
+        let m = leak_message(src);
+        let at = m
+            .split("was left when the program reached line ")
+            .nth(1)
+            .unwrap_or_else(|| panic!("no line in: {m}"));
+        at.split(|c: char| !c.is_ascii_digit())
+            .next()
+            .and_then(|n| n.parse().ok())
+            .unwrap_or_else(|| panic!("no line number in: {m}"))
     }
 
     #[test]
@@ -1621,7 +1634,7 @@ mod tests {
         it.trace_stack_leaks();
         it.add_virtual_file("lib.ps", b"% lib\n/leak {\n  42\n} def\n".as_slice())
             .expect("virtual file");
-        let _ = it.run_str("(lib.ps) run\n\nleak\n");
+        it.run_str("(lib.ps) run\n\nleak\n").expect("runs");
         let m = check(&it, true)
             .into_iter()
             .find(|f| f.check == "stack-leak")
@@ -1639,7 +1652,8 @@ mod tests {
         it.trace_stack_leaks();
         it.add_virtual_file("lib.ps", b"% lib\n/leak {\n  42\n} def\n".as_slice())
             .expect("virtual file");
-        let _ = it.run_str("(lib.ps) run\n/user {\n  1 pop\n  leak\n  2\n} def\n\nuser\n");
+        it.run_str("(lib.ps) run\n/user {\n  1 pop\n  leak\n  2\n} def\n\nuser\n")
+            .expect("runs");
         let m = check(&it, true)
             .into_iter()
             .find(|f| f.check == "stack-leak")
@@ -1661,7 +1675,7 @@ mod tests {
             b"% lib\n/leak {\n  42\n} def\n\nleak\n".as_slice(),
         )
         .expect("virtual file");
-        let _ = it.run_str("(lib.ps) run\n");
+        it.run_str("(lib.ps) run\n").expect("runs");
         let m = check(&it, true)
             .into_iter()
             .find(|f| f.check == "stack-leak")
@@ -1681,9 +1695,10 @@ mod tests {
         let mut it = Interp::with_page(50, 50).expect("page");
         it.trace_stack_leaks();
         it.set_main_file_name(Some("prelude.ps"));
-        let _ = it.run_str("% prelude\n\n/leak {\n  42\n} def\n");
+        it.run_str("% prelude\n\n/leak {\n  42\n} def\n")
+            .expect("runs");
         it.set_main_file_name(None);
-        let _ = it.run_str("leak\n");
+        it.run_str("leak\n").expect("runs");
         let m = check(&it, true)
             .into_iter()
             .find(|f| f.check == "stack-leak")
@@ -1699,7 +1714,7 @@ mod tests {
     fn a_program_that_leaks_from_every_line_keeps_the_trace_bounded() {
         let mut it = Interp::with_page(50, 50).expect("page");
         it.trace_stack_leaks();
-        let _ = it.run_str(&"1\n".repeat(5000));
+        it.run_str(&"1\n".repeat(5000)).expect("runs");
         let t = it.stack_trace().expect("trace");
         // One run per line, up to a cap (the items past it share the last
         // run), not one per leaked item.
@@ -1719,7 +1734,7 @@ mod tests {
     fn a_loop_that_pushes_from_two_lines_keeps_the_trace_small() {
         let mut it = Interp::with_page(50, 50).expect("page");
         it.trace_stack_leaks();
-        let _ = it.run_str("100000 {\n  1\n  2\n} repeat");
+        it.run_str("100000 {\n  1\n  2\n} repeat").expect("runs");
         assert!(it.stack_trace().expect("trace").run_count() < 4);
         let m = check(&it, true)
             .into_iter()
@@ -1756,20 +1771,10 @@ mod tests {
     #[test]
     fn an_empty_loop_body_names_the_loop_not_line_0() {
         // Nothing in the body to name: the loop's own push is the loop's.
-        for src in [
-            "0 1 9 { } for\n",
-            "0 1 100000 {\n} for\n",
-            "[1 2 3] {\n} forall\n",
-        ] {
-            let m = leak_message(src);
-            assert!(m.contains("was left when the program reached line "), "{m}");
-            assert!(!m.contains("line 0"), "{m}");
-        }
-        let m = leak_message("0 1 9 {\n} for\n");
-        assert!(
-            m.contains("the oldest, 0, was left when the program reached line 2"),
-            "{m}"
-        );
+        assert_eq!(leak_line("0 1 9 { } for\n"), 1);
+        assert_eq!(leak_line("0 1 100000 {\n} for\n"), 2);
+        assert_eq!(leak_line("[1 2 3] {\n} forall\n"), 2);
+        assert_eq!(leak_line("0 1 9 {\n} for\n"), 2);
     }
 
     #[test]
@@ -1807,11 +1812,76 @@ mod tests {
                 it.trace_stack_leaks();
             }
             it.run_str(src).expect("runs");
-            (it.steps_used(), it.operand_count())
+            let stack: Vec<String> = it.operand_stack().iter().map(preview).collect();
+            (it.steps_used(), stack)
         };
         let (off, on) = (run(false), run(true));
         assert_eq!(off, on);
         assert!(off.0 > 0);
+        assert!(!off.1.is_empty());
+    }
+
+    #[test]
+    fn an_item_that_replaced_its_producers_value_falls_back_to_the_token_line() {
+        // Codex round 1 on #1474: the tracker must not name an own line of a
+        // producer whose value was consumed or replaced. Each program's line
+        // is what the base (#1081) named: the token that ran last.
+        let mut wrong = Vec::new();
+        for (src, line) in [
+            // `]` and `>>` consume the mark and push the array or dictionary.
+            ("[\n77\n]\n", 3),
+            ("<<\n/a 77\n>>\n", 3),
+            // `exch pop` leaves the other operand.
+            ("77\n88\nexch pop\n", 3),
+            ("{\n77\n88\n} exec\nexch pop\n", 5),
+            // `restore` takes the save object the program put first.
+            ("save\n/f {\n77\n} def\nf\nexch restore\n", 6),
+            ("77\n88\n2 copy\n4 2 roll pop pop exch pop\n", 4),
+        ] {
+            let got = leak_line(src);
+            if got != line {
+                wrong.push(format!("{src:?}: line {got}, not {line}"));
+            }
+        }
+        assert!(wrong.is_empty(), "{wrong:#?}");
+    }
+
+    #[test]
+    fn a_swept_body_is_never_named_by_a_later_one() {
+        // A swept entry's address is reused by a later body (#1405's class):
+        // the leak is the first `{ 77 } exec` (line 2) or, if its body is
+        // gone, the call (line 3), never a line of one of the 32766 that follow.
+        let mut src = String::from("{\n77\n} exec\n");
+        src.push_str(&"{\n1\npop\n} exec\n".repeat(32766));
+        for _ in 0..8 {
+            let line = leak_line(&src);
+            assert!((2..=3).contains(&line), "line {line}");
+        }
+    }
+
+    #[test]
+    fn an_operand_left_by_an_earlier_program_has_no_origin_in_the_next() {
+        // psanim's host sequence: run, look, run again. The 77 was left by the
+        // first program; the second one's lines are not its lines.
+        let mut it = Interp::with_page(50, 50).expect("page");
+        it.trace_stack_leaks();
+        it.run_str("{\n77\n} exec\n1 pop\n").expect("first");
+        let first = check(&it, true)
+            .into_iter()
+            .find(|f| f.check == "stack-leak")
+            .expect("leak")
+            .message;
+        assert!(
+            first.contains("the oldest, 77, was left when the program reached line 2"),
+            "{first}"
+        );
+        it.run_str("{1 pop} exec\n").expect("second");
+        let second = check(&it, true)
+            .into_iter()
+            .find(|f| f.check == "stack-leak")
+            .expect("leak")
+            .message;
+        assert!(!second.contains("was left when"), "{second}");
     }
 
     #[test]
