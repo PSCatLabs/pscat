@@ -50,7 +50,7 @@ widths 4 to 12): `dcchalk` 1.00 / 0.955 to 0.962, `dycrayon` 1.01 to 1.02 / 1.04
 to 1.066, `dhstroke` 1.004 / 1.000. Under a device pixel (1500 pieces of 0.12 pt):
 `dcchalk` at `/Width` 2 / 3 gives 0.866 / 0.852, `dhstroke` 0.948 (the old guide's
 "about 13%" and "about 10%" light still hold in kind). The head library gives the
-same grid on this line to the third decimal, since its 180 pt does not divide the pitch.
+same grid on this line to the third decimal, since the pitch does not divide its length (180.9 pt).
 
 **Where the extra weight is.**
 - Nothing lands outside the whole stroke's ink, `/Fallout 3` included, so the
