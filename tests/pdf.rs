@@ -181,7 +181,8 @@ fn strokes_appear_in_pdf_only_export() {
 /// Issue #254: a `pkspray` speck is `moveto` + a zero-length `lineto` +
 /// curves. The zero-length segment adds no area, so a fill and a clip
 /// leave it out of the PDF; a stroke keeps it because it decides caps
-/// and joins. A `lineto` that actually moves is always kept.
+/// and joins (until #1224: now a stroke leaves it out as well, unless it is
+/// all there is of its subpath). A `lineto` that actually moves is always kept.
 #[test]
 fn zero_length_lineto_is_dropped_from_fills_and_clips_but_kept_in_strokes() {
     let speck = b"newpath 100 100 moveto 100 100 lineto
@@ -202,8 +203,18 @@ fn zero_length_lineto_is_dropped_from_fills_and_clips_but_kept_in_strokes() {
         .expect("clip group");
     assert!(prelude.contains(" c h W n "), "clip kept: {clip}");
     assert!(!prelude.contains(" l "), "no lineto in a clip: {clip}");
+    // A stroke drops it too (#1224): gs ignores a zero-length segment of a
+    // subpath that has length, so the caps follow the curve. Only a lone
+    // zero-length subpath keeps its `l`, as a round dot (below).
     let stroke = with(b" 4 setlinewidth 1 setlinecap stroke");
-    assert!(stroke.contains(" l "), "stroke keeps its lineto: {stroke}");
+    assert!(!stroke.contains(" l "), "stroke drops its lineto: {stroke}");
+    assert!(stroke.contains(" c h S"), "speck still drawn: {stroke}");
+    let (pdf, _) =
+        pdf_and_canvas(b"newpath 10 10 moveto 10 10 lineto 4 setlinewidth 1 setlinecap stroke");
+    assert!(
+        pdf_text(&pdf).contains(" l "),
+        "a lone dot keeps its lineto"
+    );
 
     let (pdf, _) = pdf_and_canvas(b"newpath 10 10 moveto 50 10 lineto 50 50 lineto fill");
     assert_eq!(
@@ -279,9 +290,13 @@ fn rounding_collapsed_linetos_are_dropped_in_strokes_unless_alone() {
         b"1 setlinecap 4 setlinewidth newpath 10 10 moveto 10.002 10 lineto closepath stroke",
     );
     assert_eq!(t.matches(" l ").count(), 1, "{t}");
-    // a genuine zero-length segment in a stroke is still kept (#254)
+    // a genuine zero-length segment in a stroke was kept (#254) and is
+    // dropped since #1224: gs ignores it, so does the stroke
     let t = stroke(b"1 setlinecap 4 setlinewidth newpath 10 10 moveto 50 10 lineto 50 10 lineto 50 50 lineto stroke");
-    assert_eq!(t.matches(" l ").count(), 3, "{t}");
+    assert_eq!(t.matches(" l ").count(), 2, "{t}");
+    // alone in its subpath it stays, as the dot a round cap draws
+    let t = stroke(b"1 setlinecap 4 setlinewidth newpath 10 10 moveto 10 10 lineto stroke");
+    assert_eq!(t.matches(" l ").count(), 1, "{t}");
     // fill: a collapsed l before the curve goes, as in #254
     let t =
         stroke(b"newpath 10 10 moveto 10.002 10 lineto 10 20 20 30 30 30 curveto closepath fill");

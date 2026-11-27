@@ -104,20 +104,24 @@ fn the_five_formulas_render_as_pinned() {
     // All five re-pinned for #692 (exact-area fill coverage), then for #731
     // (tiny-skia f32 pipeline, then part 2's 16-bit fill compositing); the
     // Windows cases value is from #731's windows-latest CI run.
+    // #1224 (a zero-length segment no longer aims a stroke's cap or join): 0 to 3
+    // pixels of each board moved, by at most 10/255 (the cases board by 2). The
+    // macOS and Linux pins are re-taken; the Windows cases value is from this
+    // PR's windows-latest run.
     let pinned: [u64; 5] = [
-        0x77e56b62ee521faf,
+        0x51599077cd625d9d,
         0xce8a3ed9f44a44ef,
-        0xcb31041ae26f099c,
+        0x46541afe992234e7,
         // The cases board comes out a few pixels different on Windows
         // (macOS and Linux agree): its C runtime's transcendental functions
         // round differently in the last place for one glyph. Both are
         // pinned, so each platform still catches a change.
         if cfg!(windows) {
-            0x97e14df3576b5980
+            0xf82e062d86e358b4
         } else {
-            0xb61620c5dd29d8f1
+            0x195a31c6e1a944b5
         },
-        0xc6a28449e4e5911e,
+        0xca392a75b7cc7176,
     ];
     let got: Vec<u64> = FORMULAS
         .iter()
@@ -154,7 +158,7 @@ fn the_overlay_renders_as_pinned() {
     // as before or fuller.
     assert_eq!(
         fnv1a(pm.data()),
-        0xda5c390dc07f86ac,
+        0x9347e6038c90ccb7,
         "the overlay moved: {:#x}",
         fnv1a(pm.data())
     );

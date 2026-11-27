@@ -2145,3 +2145,61 @@ mod binary_sequences_1123 {
         assert_eq!(it.run_str("1 2 add pop"), Ok(()));
     }
 }
+
+/// `stroke` and `strokepath` drop zero-length segments (#1224), a walk of
+/// the whole path and a copy of it: charged a step per 1024 segments and
+/// polled, as `reversepath` is (#1266). Codex, PR #1454.
+mod zero_length_segments_1224 {
+    use super::*;
+
+    const BUILD: &str = "newpath 0 0 moveto 3000000 { 0 0 rlineto } repeat 1 0 rlineto";
+
+    fn built() -> Interp {
+        let mut it = Interp::new();
+        it.run_str(&format!("3 setlinewidth 1 setlinecap {BUILD}"))
+            .unwrap();
+        it
+    }
+
+    /// The path and graphics state `stroke` must leave as they were.
+    fn state(it: &mut Interp) -> String {
+        it.set_limits(Limits::none()).expect("no limits");
+        it.capture_stdout();
+        it.run_str(
+            "0 { pop pop 1 add } { pop pop 1 add } { 6 { pop } repeat 1 add } { 1 add } \
+             pathforall = currentlinewidth = currentlinecap =",
+        )
+        .expect("state");
+        String::from_utf8_lossy(it.captured_stdout()).into_owned()
+    }
+
+    #[test]
+    fn a_stroke_over_many_zero_length_segments_is_charged_steps() {
+        for op in ["stroke", "strokepath"] {
+            // 3,000,002 segments are thousands of steps; `newpath` costs one.
+            let mut it = built();
+            it.set_limits(steps(200)).unwrap();
+            it.run_str("newpath").expect("a plain operator fits");
+            let mut it = built();
+            let before = state(&mut it);
+            it.set_limits(steps(200)).unwrap();
+            assert_eq!(it.run_str(op), Err(PsError::StepsExceeded), "{op}");
+            assert_eq!(state(&mut it), before, "{op}: left as it was");
+        }
+    }
+
+    #[test]
+    fn two_million_one_point_subpaths_are_charged_and_dropped() {
+        // Under square caps these are all dropped, so the stroke paints
+        // nothing: with no limits that is quick, and with a small budget it
+        // stops.
+        let src = "2 setlinecap newpath 2000000 { 1 1 moveto closepath } repeat";
+        let mut it = Interp::new();
+        it.run_str(src).unwrap();
+        it.run_str("stroke").expect("no limit");
+        let mut it = Interp::new();
+        it.run_str(src).unwrap();
+        it.set_limits(steps(200)).unwrap();
+        assert_eq!(it.run_str("stroke"), Err(PsError::StepsExceeded));
+    }
+}
