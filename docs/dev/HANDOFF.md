@@ -1975,8 +1975,11 @@ renders eight examples in both and compares block-downsampled output).
   which errs toward silence (whole-string UTF-8, outline non-symbolic face, no
   `/PSCatUnicode`), into a bounded `lint::Utf8TextTrace`. The CLI and this crate's
   `pscat mcp` server (it runs `--lint`) get it; a host that builds its own `Interp`
-  (psanim's `check`, the separate pscat-mcp repo) must call the doc(hidden)
-  `trace_utf8_text()` before the run.
+  (psanim's `check`, the separate pscat-mcp repo) calls the public
+  `Interp::set_utf8_text_check(true)` before the run and reads
+  `utf8_text_findings()` after it (#1446, `notes/1446-utf8-text-host-api.md`,
+  `docs/guides/library.md`); the doc(hidden) `trace_utf8_text()` stays for the CLI
+  and pscat-mcp.
 - **`--profile` (#737).** Per-procedure call counts and inclusive/exclusive time
   on stderr (`src/profile.rs`, a `Profiler` on `Interp`). `execute_resolved` takes
   the name a body was reached through (`via`, `NO_NAME` for `exec`/`if`) and, with

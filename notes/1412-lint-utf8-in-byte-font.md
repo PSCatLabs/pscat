@@ -66,7 +66,8 @@ visible under `--lint`, so no render can tell the binaries apart.
 
 **Not done.** The CLI `--lint`, `--bands --lint` and this crate's `pscat mcp`
 server (which runs the `--lint` child) get the finding. A host that builds its
-own `Interp` (psanim's `check`, the separate pscat-mcp repo) gets it only by
-calling the doc(hidden) `Interp::trace_utf8_text()` before the run. The message
+own `Interp` (psanim's `check`, the separate pscat-mcp repo) got it only by
+calling the doc(hidden) `Interp::trace_utf8_text()` before the run; #1446 added
+the public form (`notes/1446-utf8-text-host-api.md`). The message
 names the dict's `FontName`, which a `definefont` copy keeps from the original
 face. Type 3 fonts are skipped.

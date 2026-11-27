@@ -3766,9 +3766,21 @@ impl Interp {
     /// Have every show note a string of UTF-8 text it gives a byte-mode
     /// font, for the `[utf8-in-byte-font]` lint (issue #1412). Off by
     /// default (a show then costs one extra branch); `--lint` turns it on.
+    /// A host uses [`set_utf8_text_check`](Self::set_utf8_text_check).
     #[doc(hidden)]
     pub fn trace_utf8_text(&mut self) {
         self.utf8_text_trace.get_or_insert_with(Default::default);
+    }
+
+    /// Switch the byte-mode-font text check on or off (see
+    /// [`set_utf8_text_check`](Self::set_utf8_text_check)); off drops what
+    /// was noted.
+    pub(crate) fn set_utf8_text_trace(&mut self, on: bool) {
+        if on {
+            self.trace_utf8_text();
+        } else {
+            self.utf8_text_trace = None;
+        }
     }
 
     pub(crate) fn utf8_text_trace(&self) -> Option<&crate::lint::Utf8TextTrace> {
@@ -3792,16 +3804,17 @@ impl Interp {
         let Some((font, text)) = crate::font::utf8_in_byte_font(fs, ctx.text()) else {
             return;
         };
-        let at = self.last_line.map(|line| {
-            let file = self
-                .last_file
-                .as_deref()
-                .map(|f| format!(" ({})", report_name(f)))
-                .unwrap_or_default();
-            format!("when the program reached line {line}{file}")
-        });
+        let (line, last_file, main_file) = (self.last_line, &self.last_file, &self.main_file_name);
         if let Some(trace) = self.utf8_text_trace.as_mut() {
-            trace.note(&font, text, at);
+            trace.note(&font, text, || crate::lint::Utf8Site {
+                line,
+                run_file: line.and(last_file.as_deref()).map(report_name),
+                // A line with no `run` file is the main program's.
+                main_file: line
+                    .filter(|_| last_file.is_none())
+                    .and(main_file.as_deref())
+                    .map(report_name),
+            });
         }
     }
 

@@ -493,6 +493,44 @@ the figures). An entry of a freed procedure is dropped at the next sweep (when t
 table has quadrupled, or a program runs out of names), and the unnamed main
 program's go when the next program begins.
 
+**Text in the wrong font mode.** `(aπb) show` in Helvetica reads the two bytes
+of `π` as two characters and draws a stray accent. That is correct PostScript,
+so it runs without an error; a font with `/PSCatUnicode true` reads the string
+as UTF-8 (see [Fonts](fonts.md)). `pscat --lint` reports it as
+`[utf8-in-byte-font]`, and a host that builds its own `Interp` turns the same
+check on with `set_utf8_text_check(true)` and reads what it found with
+`utf8_text_findings()`, a `host::Utf8TextReport` of one `Utf8TextFinding` per
+font: the font's name, the characters (as `char`s), and the `line` and `file`.
+It is the check psanim's `check` uses.
+
+```rust
+let mut interp = pscat::Interp::with_page(100, 100).expect("valid page size");
+interp.set_utf8_text_check(true);
+interp.set_main_file_name(Some("scene.ps"));
+interp.run_str("/Helvetica findfont 12 scalefont setfont 5 40 moveto\n(aπb) show")?;
+let report = interp.utf8_text_findings();
+let finding = &report.fonts[0];
+assert_eq!(finding.font, "Helvetica");
+assert_eq!(finding.characters, ['π']);
+assert_eq!((finding.file.as_deref(), finding.line), (Some("scene.ps"), Some(2)));
+```
+
+It is off by default and costs a show one extra branch while off; turning it on
+never changes what a program draws, leaves on its stacks or how many steps it
+takes. `line` and `file` are where execution was, as for `ErrorDetails::line`:
+the line of the most recent token scanned, which for a show inside a procedure
+is the line that called it. The file is a `run` file's name or, for a line of
+the main program, the name given to `set_main_file_name`. The findings belong
+to the program that ran last (starting the next one forgets them, so read them
+after each run, one that returned an error too), and are bounded:
+`MAX_UTF8_TEXT_FONTS` fonts (more are counted in `more_fonts`),
+`MAX_UTF8_TEXT_CHARS` characters each and a font name of at most
+`MAX_UTF8_TEXT_NAME_BYTES`. The check is deliberately narrow (a string that is
+wholly well-formed UTF-8 in an outline face with no `/PSCatUnicode`, and no
+custom `Encoding`; `kshow` and strings over 4096 bytes are not examined), so a
+clean report is not a proof. Like the rest of the crate API it is
+[Experimental](../STABILITY.md#experimental): it can change in any release.
+
 **Stopping a program.** `set_interrupt` takes an `Arc<AtomicBool>`; raising it
 from another thread makes `run_str` return `PsError::Interrupted` at its next
 look: before the program starts, every few thousand steps, inside any host

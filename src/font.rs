@@ -107,11 +107,16 @@ pub(crate) fn utf8_in_byte_font<'a>(fs: &FontState, text: &'a [u8]) -> Option<(S
     if custom_encoding(fs) {
         return None;
     }
-    Some((font_name(fs), text))
+    Some((font_name_up_to(fs, UTF8_FONT_NAME_MAX), text))
 }
 
 /// The longest string [`utf8_in_byte_font`] examines (#1412).
 const UTF8_SCAN_MAX: usize = 4096;
+
+/// The longest font name [`utf8_in_byte_font`] returns, in bytes: a program
+/// can give a font dict a `FontName` of any size, and the name is made for
+/// every show that qualifies and kept (#1446).
+pub(crate) const UTF8_FONT_NAME_MAX: usize = 128;
 
 /// Whether `fs` has an Encoding that is neither StandardEncoding (which a
 /// dict without one gets) nor ISOLatin1Encoding.
@@ -134,9 +139,31 @@ fn custom_encoding(fs: &FontState) -> bool {
 
 /// The `FontName` of a font dict, for a message; `?` when it has none.
 fn font_name(fs: &FontState) -> String {
+    font_name_up_to(fs, usize::MAX)
+}
+
+/// [`font_name`], cut to `max` bytes (at a character boundary) and ended
+/// with `...` when it was longer. Only the part kept is copied, however long
+/// the name.
+fn font_name_up_to(fs: &FontState, max: usize) -> String {
+    fn cut(text: &str, max: usize) -> String {
+        if text.len() <= max {
+            return text.to_string();
+        }
+        let mut end = max;
+        while !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        format!("{}...", &text[..end])
+    }
     match fs.dict.borrow().get("FontName").map(|o| o.value.clone()) {
-        Some(Value::Name(n)) => n.to_string(),
-        Some(Value::String(s)) => s.text(),
+        Some(Value::Name(n)) => cut(&n, max),
+        Some(Value::String(s)) if s.len() <= max => s.text(),
+        // One byte past `max` is enough for `cut` to see that it was cut.
+        Some(Value::String(s)) => cut(
+            &String::from_utf8_lossy(&s.borrow_bytes()[..max.saturating_add(1).min(s.len())]),
+            max,
+        ),
         _ => "?".to_string(),
     }
 }
