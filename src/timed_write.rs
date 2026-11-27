@@ -10,12 +10,12 @@
 //! description, which the parent shell and sibling processes share, and
 //! flipping it under them makes their writes fail with `EAGAIN`. Instead:
 //!
-//! - A pipe (FIFO) is written at most `PIPE_BUF` bytes at a time, and only
-//!   after `poll` reports it writable. A writable pipe has room for
-//!   `PIPE_BUF` bytes (macOS: `PIPE_BUF` free; Linux: a free page slot), so
-//!   that blocking write returns at once. Another process writing to the same
-//!   pipe between the `poll` and the `write` can still fill it: then the
-//!   write blocks as it always did.
+//! - A pipe (FIFO) is written no more than it has room for. On Linux that
+//!   is `PIPE_BUF` bytes after `poll` reports it writable (a free page
+//!   slot), on macOS the free space `fstat` reports, which also lets a full
+//!   pipe grow from 16 to 64 KiB as a plain write would. Another process
+//!   writing to the same pipe between the look and the `write` can still
+//!   fill it: then the write blocks as it always did.
 //! - A socket is written with `send(MSG_DONTWAIT)` on Linux, non-blocking
 //!   for that call only, and waits in `poll` on `EAGAIN`. macOS ignores the
 //!   flag on a blocking socket, so there it is written like a pipe, in
@@ -32,7 +32,7 @@ use std::sync::OnceLock;
 pub(crate) enum FdKind {
     /// A plain blocking write: regular files, terminals, character devices.
     Blocking,
-    /// A pipe or FIFO: `poll`, then at most `PIPE_BUF` bytes.
+    /// A pipe or FIFO: no more than it has room for.
     Fifo,
     /// A socket: `send(MSG_DONTWAIT)` on Linux, else as a pipe in small pieces.
     Socket,
@@ -103,26 +103,40 @@ pub(crate) fn write_all(
 ) -> Result<(), WriteStop> {
     let mut since_look = 0usize;
     while !bytes.is_empty() {
-        let poll_first = match kind {
-            FdKind::Fifo => true,
-            FdKind::Socket => !SOCKET_DONTWAIT,
-            FdKind::Blocking => false,
-        };
-        if poll_first {
-            match wait_writable(fd) {
-                Ready::Yes => {}
+        let n = match kind {
+            FdKind::Fifo => match fifo_room(fd) {
+                Room::Free(free) => bytes.len().min(free),
+                Room::Grows => bytes.len().min(libc::PIPE_BUF),
+                Room::Unknown | Room::Full => match wait_writable(fd) {
+                    // `Full` re-reads the room once `poll` sees a reader
+                    // take some; `Unknown` (not macOS) trusts `poll`.
+                    Ready::Yes if fifo_room(fd) == Room::Unknown => bytes.len().min(libc::PIPE_BUF),
+                    // Asked here too, so `poll` and `fstat` disagreeing
+                    // cannot spin past the deadline.
+                    Ready::Yes | Ready::NotYet => {
+                        look().map_err(WriteStop::Limit)?;
+                        since_look = 0;
+                        continue;
+                    }
+                    // Not a descriptor `poll` understands: write as before.
+                    Ready::Unknown => {
+                        kind = FdKind::Blocking;
+                        bytes.len()
+                    }
+                },
+            },
+            FdKind::Socket if !SOCKET_DONTWAIT => match wait_writable(fd) {
+                Ready::Yes => bytes.len().min(SOCKET_CHUNK),
                 Ready::NotYet => {
                     look().map_err(WriteStop::Limit)?;
                     since_look = 0;
                     continue;
                 }
-                // Not a descriptor `poll` understands: write as before.
-                Ready::Unknown => kind = FdKind::Blocking,
-            }
-        }
-        let n = match kind {
-            FdKind::Fifo => bytes.len().min(libc::PIPE_BUF),
-            FdKind::Socket if !SOCKET_DONTWAIT => bytes.len().min(SOCKET_CHUNK),
+                Ready::Unknown => {
+                    kind = FdKind::Blocking;
+                    bytes.len()
+                }
+            },
             _ => bytes.len(),
         };
         let ptr = bytes.as_ptr().cast::<libc::c_void>();
@@ -170,6 +184,55 @@ pub(crate) fn write_all(
 const SEND_FLAGS: libc::c_int = libc::MSG_DONTWAIT | libc::MSG_NOSIGNAL;
 #[cfg(not(any(target_os = "linux", target_os = "android")))]
 const SEND_FLAGS: libc::c_int = 0;
+
+/// How much a pipe takes without blocking, where the system says.
+#[derive(PartialEq, Eq, Debug)]
+enum Room {
+    /// This many bytes are free: a write of no more returns at once.
+    Free(usize),
+    /// Full, but smaller than the most a pipe grows to: a small write makes
+    /// the kernel grow it, as a plain write would (macOS starts a pipe at
+    /// 16 KiB and grows it to 64 KiB on a write that does not fit; `poll`
+    /// calls a full 16 KiB pipe not writable, so without this an undrained
+    /// pipe would hold a quarter of what it did).
+    Grows,
+    /// Full at its largest: wait for the reader.
+    Full,
+    /// The system does not say: trust `poll`.
+    Unknown,
+}
+
+/// The largest a macOS pipe grows to (`BIG_PIPE_SIZE` in XNU's
+/// `sys_pipe.c`).
+#[cfg(target_os = "macos")]
+const MACOS_BIG_PIPE: i64 = 64 << 10;
+
+/// A macOS pipe's room: `fstat` on either end gives the buffer's size as
+/// `st_blksize` and the bytes in it as `st_size`.
+#[cfg(target_os = "macos")]
+fn fifo_room(fd: libc::c_int) -> Room {
+    // SAFETY: `fstat` fills the zeroed struct or fails; nothing else is read.
+    let mut st: libc::stat = unsafe { std::mem::zeroed() };
+    if unsafe { libc::fstat(fd, &mut st) } != 0 {
+        return Room::Unknown;
+    }
+    let (size, held) = (i64::from(st.st_blksize), st.st_size);
+    if size <= 0 || held < 0 {
+        return Room::Unknown;
+    }
+    match size - held {
+        free if free > 0 => Room::Free(usize::try_from(free).unwrap_or(0)),
+        _ if size < MACOS_BIG_PIPE => Room::Grows,
+        _ => Room::Full,
+    }
+}
+
+/// Elsewhere `poll` is the measure (Linux: a writable pipe has a free page
+/// slot, so a write of `PIPE_BUF` returns at once).
+#[cfg(not(target_os = "macos"))]
+fn fifo_room(_fd: libc::c_int) -> Room {
+    Room::Unknown
+}
 
 #[derive(PartialEq, Eq)]
 enum Ready {

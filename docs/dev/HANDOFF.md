@@ -1766,9 +1766,10 @@ renders eight examples in both and compares block-downsampled output).
     too, or `{ } loop` hangs again.
   - A program's stdout/stderr write can block on a reader (#1457), so under a
     time limit or an interrupt flag `Interp::write_stdout`/`write_stderr` take
-    `src/timed_write.rs` for a pipe or socket: `poll` then a write small
-    enough not to block (`PIPE_BUF`; `send(MSG_DONTWAIT)` on a Linux socket),
-    never `O_NONBLOCK` (the file description is shared with the shell). That
+    `src/timed_write.rs` for a pipe or socket: a write no bigger than the
+    room (Linux: `poll` then `PIPE_BUF`; macOS: `fstat`'s free space, letting
+    a full pipe grow 16 -> 64 KiB as a plain write does; `send(MSG_DONTWAIT)`
+    on a Linux socket), never `O_NONBLOCK` (the description is shared). That
     path bypasses std's `LineWriter`, so it keeps `stdout_pending` and
     `step_n` flushes it at every slice end. A new writer to fd 1 or 2 goes
     through those two methods and passes their `PsError` up unchanged (a

@@ -74,7 +74,8 @@ fn every_stdout_writer_stops_at_max_time_on_an_undrained_pipe() {
     let big = BIG.to_string();
     let cases: Vec<(&str, String, &[u8])> = vec![
         ("=", format!("{big} string ="), b"\0"),
-        ("==", format!("{big} string =="), b"(\\0"),
+        // `==` bounds one string (#703): a loop of them.
+        ("==", "{ 1000 string == } loop".into(), b""),
         ("print", format!("{big} string print"), b"\0"),
         (
             "write",
@@ -284,4 +285,54 @@ fn a_closed_stdout_under_a_time_limit_ends_quietly() {
             "{program}: the SIGPIPE status"
         );
     }
+}
+
+/// Output a pipe can hold is still written in full when nobody reads until
+/// the child exits: under the time limit as without it. (macOS starts a pipe
+/// at 16 KiB and grows it to 64 KiB on a write that does not fit; the timed
+/// path must let it grow, not stop at the first 16 KiB.)
+#[test]
+fn output_that_fits_the_pipe_is_written_in_full_under_a_time_limit() {
+    for (program, len) in [
+        ("40000 string print", 40_000),
+        ("1 1 7000 { 10000 add = } for", 7000 * 6),
+    ] {
+        for flags in [&[][..], &["--max-time", "30"][..]] {
+            let (mut reader, writer) = std::io::pipe().expect("a pipe for the child's stdout");
+            let mut args = flags.to_vec();
+            args.extend(["-e", program]);
+            let child = spawn(&args, writer.into(), Stdio::piped());
+            let out = common::wait_with_deadline(child, GUARD);
+            let mut held = Vec::new();
+            reader.read_to_end(&mut held).expect("read the pipe");
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            assert!(out.status.success(), "{program} {flags:?}: {stderr}");
+            assert_eq!(held.len(), len, "{program} {flags:?}");
+        }
+    }
+}
+
+/// A stopped write is an operator error like any other: the operand stack is
+/// restored (the string is back on it), as `--pstack-on-error` shows.
+#[test]
+fn a_stopped_write_restores_its_operands() {
+    let (_reader, writer) = std::io::pipe().expect("a pipe for the child's stdout");
+    let child = spawn(
+        &[
+            "--max-time",
+            "0.1",
+            "--pstack-on-error",
+            "-e",
+            &format!("1 2 {BIG} string print"),
+        ],
+        writer.into(),
+        Stdio::piped(),
+    );
+    let out = common::wait_with_deadline(child, GUARD);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("limitexceeded (time); OffendingCommand: print"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("Operand stack (3): 1 2 ("), "{stderr}");
 }

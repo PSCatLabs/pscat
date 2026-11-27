@@ -632,6 +632,7 @@ pub struct Interp {
     /// out at its newline, as `LineWriter` sends it, and a partial line at
     /// `flush` or the end of the slice. Never more than
     /// `STDOUT_PENDING_MAX` bytes.
+    #[cfg(unix)]
     stdout_pending: Vec<u8>,
     /// When set, what the program writes to stderr (`(%stderr)` files,
     /// `handleerror`, `findfont`'s stand-in notes) is dropped; the notes
@@ -935,6 +936,7 @@ impl Interp {
             keep_dicts_on_drop: false,
             stdout_capture: None,
             stdout_truncated: false,
+            #[cfg(unix)]
             stdout_pending: Vec::new(),
             quiet_stderr: false,
             limits: Limits::none(),
