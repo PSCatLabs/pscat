@@ -3131,21 +3131,31 @@ fn big_function_pattern() -> String {
     format!("{} /grad exch def", type1("[1000 0 0 1000 0 -300]"))
 }
 
+/// A page pattern and a tile on a far larger canvas (2900 x 2900), so that
+/// painting the image takes far longer than anything else the tile does.
+fn big_canvas_use() -> (String, String) {
+    (
+        format!("{} /grad exch def", type1("[2900 0 0 2900 0 -2000]")),
+        USE_FROM_A_TILE.replace(
+            "[0 0 1000 1000] /XStep 1000 /YStep 1000",
+            "[0 0 2900 2900] /XStep 2900 /YStep 2900",
+        ),
+    )
+}
+
 /// The SVG and the canvas a stopped mark leaves, from a run on a 1000 x 1000
-/// page that makes the pattern, then `set_limits`, then paints with it.
-fn run_foreign_use(limits: pscat::Limits) -> (Result<(), pscat::PsError>, Vec<String>, Vec<u8>) {
+/// page that makes `pattern`, then `set_limits`, then paints with `tile`.
+fn run_foreign_use(
+    pattern: &str,
+    tile: &str,
+    limits: pscat::Limits,
+) -> (Result<(), pscat::PsError>, Vec<String>, Vec<u8>) {
     let mut it = Interp::with_page(1000, 1000).expect("page");
     it.gfx_mut().enable_svg();
-    it.run_source(
-        format!(
-            "1 0 0 setrgbcolor 0 0 1000 1000 rectfill {}",
-            big_function_pattern()
-        )
-        .as_bytes(),
-    )
-    .expect("setup");
+    it.run_source(format!("1 0 0 setrgbcolor 0 0 1000 1000 rectfill {pattern}").as_bytes())
+        .expect("setup");
     it.set_limits(limits).expect("limits");
-    let r = it.run_source(USE_FROM_A_TILE.as_bytes());
+    let r = it.run_source(tile.as_bytes());
     (
         r,
         it.gfx().svg_pages().expect("svg on"),
@@ -3157,43 +3167,52 @@ fn run_foreign_use(limits: pscat::Limits) -> (Result<(), pscat::PsError>, Vec<St
 /// and polled against the clock before anything is painted or recorded
 /// (#1368, as the mark's own layer is): a mark that is one point wide still
 /// has the whole canvas's image to make, and a limit it meets leaves the
-/// page and the SVG as they were.
+/// page and the SVG as they were. Each case has a control, the same tile
+/// painting a flat colour under the same limit, which finishes: it is the
+/// image, not the tile, that meets the limit.
 #[test]
 fn a_foreign_use_image_answers_to_the_step_and_time_limits() {
-    let (ok, svg_ok, _) = run_foreign_use(pscat::Limits::none().with_max_steps(5_000_000));
+    use pscat::{Limits, PsError};
+    let flat = USE_FROM_A_TILE.replace(
+        "pop grad setpattern 0 0 1 1 rectfill",
+        "pop 0 0 1 1 rectfill",
+    );
+    let fast = big_function_pattern();
+    let (slow, slow_tile) = big_canvas_use();
+    let slow_flat = slow_tile.replace(
+        "pop grad setpattern 0 0 1 1 rectfill",
+        "pop 0 0 1 1 rectfill",
+    );
+    let (ok, svg_ok, _) = run_foreign_use(
+        &fast,
+        USE_FROM_A_TILE,
+        Limits::none().with_max_steps(5_000_000),
+    );
     assert_eq!(ok, Ok(()));
     assert_eq!(svg_ok[0].matches("<image ").count(), 1, "{}", svg_ok[0]);
-    let (_, svg_before, px_before) = {
-        // The same page and pattern, nothing painted with it.
-        let mut it = Interp::with_page(1000, 1000).expect("page");
-        it.gfx_mut().enable_svg();
-        it.run_source(
-            format!(
-                "1 0 0 setrgbcolor 0 0 1000 1000 rectfill {}",
-                big_function_pattern()
-            )
-            .as_bytes(),
-        )
-        .expect("setup");
-        (
-            Ok::<(), pscat::PsError>(()),
-            it.gfx().svg_pages().expect("svg on"),
-            it.gfx().pixmap.data().to_vec(),
-        )
-    };
-    for (what, limits, want) in [
+    for (what, pattern, tile, control_tile, limits, want) in [
         (
             "steps",
-            pscat::Limits::none().with_max_steps(20_000),
-            pscat::PsError::StepsExceeded,
+            &fast,
+            USE_FROM_A_TILE,
+            &flat,
+            Limits::none().with_max_steps(20_000),
+            PsError::StepsExceeded,
         ),
         (
             "time",
-            pscat::Limits::none().with_max_time(std::time::Duration::from_millis(1)),
-            pscat::PsError::TimeExceeded,
+            &slow,
+            slow_tile.as_str(),
+            &slow_flat,
+            Limits::none().with_max_time(std::time::Duration::from_millis(150)),
+            PsError::TimeExceeded,
         ),
     ] {
-        let (r, svg, px) = run_foreign_use(limits);
+        let (control, ..) = run_foreign_use(pattern, control_tile, limits);
+        assert_eq!(control, Ok(()), "{what}: the tile alone fits the limit");
+        // The same page and pattern, nothing painted with it.
+        let (_, svg_before, px_before) = run_foreign_use(pattern, "", Limits::none());
+        let (r, svg, px) = run_foreign_use(pattern, tile, limits);
         assert_eq!(r, Err(want), "{what}");
         assert_eq!(svg, svg_before, "{what}: the SVG is as it was");
         assert!(px == px_before, "{what}: the page is as it was");
@@ -3243,9 +3262,9 @@ fn a_foreign_use_image_answers_to_the_memory_limit() {
         "pop grad setpattern 0 0 1 1 rectfill",
         "pop 0 0 1 1 rectfill",
     );
-    let (ok, out, ..) = limited_exports(&flat, "1000x1000", ["--max-memory", "12"]);
+    let (ok, out, ..) = limited_exports(&flat, "1000x1000", ["--max-memory", "11"]);
     assert!(ok, "the tile alone fits the cap: {out}");
-    let (ok, out, svg, png) = limited_exports(&full, "1000x1000", ["--max-memory", "12"]);
+    let (ok, out, svg, png) = limited_exports(&full, "1000x1000", ["--max-memory", "11"]);
     assert!(
         !ok && out.contains("limitexceeded (memory)") && out.contains("OffendingCommand: rectfill"),
         "{out}"
@@ -3287,7 +3306,7 @@ fn the_images_of_many_foreign_uses_add_up_against_the_memory_limit() {
     let (ok, out, all, _) = limited_exports(&src, "400x400", ["--max-memory", "0"]);
     assert!(ok, "{out}");
     assert_eq!(all.matches("<image ").count(), 60, "one image per context");
-    let (ok, out, some, _) = limited_exports(&src, "400x400", ["--max-memory", "40"]);
+    let (ok, out, some, _) = limited_exports(&src, "400x400", ["--max-memory", "30"]);
     assert!(
         !ok && out.contains("limitexceeded (memory)") && out.contains("OffendingCommand: rectfill"),
         "{out}"
