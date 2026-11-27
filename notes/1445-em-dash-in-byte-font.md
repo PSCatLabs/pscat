@@ -4,7 +4,7 @@
 `gallery/mochi_denim_blue.ps` (the painted signature) wrote an em dash as UTF-8
 inside a string shown in a Palatino face. Those faces read one byte per
 character, so the three UTF-8 bytes were three unencoded codes and the dash drew
-as a blank gap (since #1115, one space wide). `pscat --lint` finds it as
+as a blank gap (since #1115, one space per byte: three wide). `pscat --lint` finds it as
 `[utf8-in-byte-font]` (#1412).
 
 - **Fix.** Each shown dash is the octal escape `\320`, the em dash in
