@@ -137,12 +137,14 @@ pub(crate) struct ImageCtx {
     lut: Option<Vec<f32>>,
     waiting: bool,
     eod: bool,
-    /// The name of the operator that began the image (`image`,
-    /// `imagemask`, `colorimage`), put back as the offending command each
-    /// time the frame steps (#1188): a data procedure runs in between, and
-    /// a limit the recorders find must blame the image, not the
-    /// procedure's last operator.
-    pub(crate) op_name: Option<u32>,
+    /// The operator that began the image (`image`, `imagemask`,
+    /// `colorimage`), put back as the offending command each time the frame
+    /// steps (#1188): a data procedure runs in between, and a limit the
+    /// recorders find must blame the image, not the procedure's last
+    /// operator. Held as the operator itself, not its name (#1242): a
+    /// program that redefines `image` after the image began must not change
+    /// which operator is blamed.
+    pub(crate) op: Option<crate::object::Operator>,
     /// The limits when the image began, for the recorders (#1188).
     pub(crate) probe: crate::limits::LimitProbe,
     /// The work a shading pattern's layer took (#1298), held against the
@@ -182,7 +184,7 @@ impl ImageCtx {
             lut: None,
             waiting: false,
             eod: false,
-            op_name: None,
+            op: None,
             probe: crate::limits::LimitProbe::NONE,
             layer_work: std::cell::Cell::new(0),
         }

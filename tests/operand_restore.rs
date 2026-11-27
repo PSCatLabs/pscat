@@ -604,7 +604,9 @@ fn an_execstackoverflow_leaves_the_operands() {
             "/execstackoverflow --exec-- {r}",
         ),
         // An executable name resolves to a procedure that needs a frame, so
-        // the overflow leaves the name too (#1242; gs 10.07.1 leaves `r`).
+        // the overflow leaves the name too (#1242). gs 10.07.1 leaves `r` as
+        // the operand under its own copy of the execution stack; pscat
+        // pushes no such array, so `r` is the whole stack.
         (
             "/r { /r cvx exec 0 pop } def",
             "/execstackoverflow --exec-- r",
@@ -617,9 +619,10 @@ fn an_execstackoverflow_leaves_the_operands() {
             "/r { /s cvx exec 0 pop } def /s /t cvx def /t /r cvx def",
             "/execstackoverflow --exec-- s",
         ),
-        // A name that resolves to an operator needs no frame: `pop` runs at
-        // the limit (the body's own frame is the last one that fits), and
-        // the overflow is the recursive call's, with the stack as it was.
+        // pscat's own guard against over-triggering, not pinned to gs (whose
+        // limit is elsewhere): a name that resolves to an operator needs no
+        // frame, so `pop` runs at the limit (the body's own frame is the
+        // last one that fits) and the overflow is the recursive call's.
         ("/r { 1 /pop cvx exec r 0 pop } def", "/execstackoverflow r"),
     ] {
         let mut it = Interp::new();
