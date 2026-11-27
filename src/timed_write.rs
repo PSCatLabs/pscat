@@ -32,14 +32,16 @@
 //! **Stdout's line buffer.** std's stdout is a `LineWriter` of 1024 bytes,
 //! and where it flushes decides how stdout and stderr interleave and in which
 //! operator a write error surfaces. The timed path cannot write through it
-//! (its flush would block), so it keeps its own buffer, [`BUFFER`], with
-//! std's rules exactly ([`line_write`]): process-wide like std's, and handed
-//! over to std's own buffer ([`hand_over`]) before anything else writes to
-//! stdout, so the two never reorder.
+//! (its flush would block), so it keeps its own buffer, [`LINE`], with
+//! std's rules exactly ([`line_write`]), owned by one interpreter at a time,
+//! and sent ([`send_line`]) wherever the CLI flushes its stdout, so the two
+//! never reorder.
 
 use crate::PsError;
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(target_os = "linux")]
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// How a descriptor is written.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -401,37 +403,107 @@ const CAPACITY: usize = 1024;
 
 /// Program stdout written on the timed path and not yet sent: std's
 /// `LineWriter` buffer, kept here because the timed path cannot write
-/// through std's. Process-wide like std's; never more than [`CAPACITY`].
-static BUFFER: Mutex<Vec<u8>> = Mutex::new(Vec::new());
+/// through std's (its flush would block). Never more than [`CAPACITY`].
+///
+/// One interpreter owns it at a time (`owner`, an `Interp`'s `host_id`; 0
+/// for none): the first to write while it is empty claims it, and it is
+/// free again once empty. Another interpreter's writes meanwhile go straight
+/// to the descriptor ([`LineWrite::NotOwner`]), and its `Drop` never touches
+/// it, so one interpreter cannot send another's partial line early, drop it,
+/// or wait on it.
+struct Line {
+    buf: Vec<u8>,
+    owner: u64,
+}
 
-/// [`BUFFER`] is not empty: the one load the plain path pays to know it has
-/// nothing to hand over.
-static BUFFERED: AtomicBool = AtomicBool::new(false);
+static LINE: Mutex<Line> = Mutex::new(Line {
+    buf: Vec::new(),
+    owner: 0,
+});
 
-fn buffer() -> std::sync::MutexGuard<'static, Vec<u8>> {
-    // A panic mid-write poisons it; the bytes in it are still the output.
-    BUFFER
-        .lock()
+/// The owner of [`LINE`], 0 for none: what a reader that must not wait
+/// on the lock (`Drop`, the plain path) looks at first. Written only with
+/// the lock held.
+static OWNER: AtomicU64 = AtomicU64::new(0);
+
+/// Whether interpreter `id` holds bytes in the line buffer.
+pub(crate) fn owned_by(id: u64) -> bool {
+    OWNER.load(Ordering::Relaxed) == id
+}
+
+/// Take `mutex` without waiting past `look`: try, and between tries ask
+/// `look` (a thread stuck in a write may hold it).
+fn lock_within<'a, T>(
+    mutex: &'a Mutex<T>,
+    look: &mut dyn FnMut() -> Result<(), PsError>,
+) -> Result<std::sync::MutexGuard<'a, T>, PsError> {
+    loop {
+        match mutex.try_lock() {
+            Ok(guard) => return Ok(guard),
+            // A panic mid-write poisons it; what it holds is still the output.
+            Err(std::sync::TryLockError::Poisoned(p)) => return Ok(p.into_inner()),
+            Err(std::sync::TryLockError::WouldBlock) => {
+                look()?;
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+        }
+    }
+}
+
+fn lock_line() -> std::sync::MutexGuard<'static, Line> {
+    LINE.lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-/// Whether the timed path holds stdout bytes not yet sent.
-pub(crate) fn buffered() -> bool {
-    BUFFERED.load(Ordering::Relaxed)
+/// Keep [`OWNER`] in step after `line` changed: the buffer is free once
+/// empty.
+fn settle(line: &mut Line) {
+    if line.buf.is_empty() {
+        line.owner = 0;
+    }
+    OWNER.store(line.owner, Ordering::Relaxed);
 }
 
-/// Write `bytes` to stdout (fd 1, of `kind`) as std's `LineWriter` would,
-/// then flush when `flush` is set: the same bytes leave at the same call,
-/// and an error is this call's. The caller holds std's stdout lock.
+/// Serialises the timed stderr writes of several threads, as std's stderr
+/// lock does for its own, but taken within the deadline.
+static STDERR: Mutex<()> = Mutex::new(());
+
+/// A timed write to stderr (unbuffered, as std's is).
+pub(crate) fn stderr_write(
+    kind: FdKind,
+    bytes: &[u8],
+    look: &mut dyn FnMut() -> Result<(), PsError>,
+) -> Result<(), WriteStop> {
+    let _guard = lock_within(&STDERR, look).map_err(WriteStop::Limit)?;
+    write_all(2, kind, bytes, look).map_err(|s| s.why)
+}
+
+/// What [`line_write`] did.
+pub(crate) enum LineWrite {
+    /// Written as std's `LineWriter` would have.
+    Done,
+    /// Another interpreter owns the buffer: the caller writes its bytes
+    /// itself, straight through.
+    NotOwner,
+}
+
+/// Write `bytes` to stdout (fd 1, of `kind`) for interpreter `id` as std's
+/// `LineWriter` would, then flush when `flush` is set: the same bytes leave
+/// at the same call, and an error is this call's.
 pub(crate) fn line_write(
+    id: u64,
     kind: FdKind,
     bytes: &[u8],
     flush: bool,
     look: &mut dyn FnMut() -> Result<(), PsError>,
-) -> Result<(), WriteStop> {
-    let mut buf = buffer();
+) -> Result<LineWrite, WriteStop> {
+    let mut line = lock_within(&LINE, look).map_err(WriteStop::Limit)?;
+    if line.owner != 0 && line.owner != id {
+        return Ok(LineWrite::NotOwner);
+    }
+    line.owner = id;
     let mut out = LineOut {
-        buf: &mut buf,
+        buf: &mut line.buf,
         kind,
         look,
     };
@@ -439,8 +511,18 @@ pub(crate) fn line_write(
     if r.is_ok() && flush {
         r = out.flush_buf();
     }
-    BUFFERED.store(!buf.is_empty(), Ordering::Relaxed);
-    r
+    settle(&mut line);
+    r.map(|()| LineWrite::Done)
+}
+
+/// A write of `bytes` straight to stdout, for an interpreter that does not
+/// own the line buffer.
+pub(crate) fn direct_write(
+    kind: FdKind,
+    bytes: &[u8],
+    look: &mut dyn FnMut() -> Result<(), PsError>,
+) -> Result<(), WriteStop> {
+    write_all(1, kind, bytes, look).map_err(|s| s.why)
 }
 
 struct LineOut<'a, 'b> {
@@ -515,78 +597,105 @@ impl LineOut<'_, '_> {
     }
 }
 
-/// Move what [`BUFFER`] holds into std's own stdout buffer, so whatever
-/// writes to stdout next (the CLI's own output, a REPL prompt, the exit
-/// flush) comes after it, as it would if it had been in std's buffer all
-/// along. No I/O as long as std's buffer is empty (it always is, during a
-/// run): a partial line under [`CAPACITY`] bytes, written in two pieces so
-/// std never takes its write-through path for a buffer-sized piece.
-pub(crate) fn hand_over() -> std::io::Result<()> {
-    use std::io::Write;
-    if !buffered() {
+/// Send what the line buffer holds now, with no deadline: what std's flush
+/// does where the CLI flushes its stdout (its own output, the REPL prompt,
+/// the end of `main`), and where the owner is dropped. A write that fails
+/// keeps the bytes not written in the buffer, as std's `flush_buf` does, so
+/// the next flush fails again, and returns the error: a reader that went
+/// away still shows at the CLI's last flush (Codex round 2, R1).
+///
+/// `only` limits it to one owner (`Drop`, the plain path); `None` sends
+/// whatever is there (the CLI, which runs one interpreter).
+pub(crate) fn send_line(only: Option<u64>) -> std::io::Result<()> {
+    if OWNER.load(Ordering::Relaxed) == 0 || only.is_some_and(|id| !owned_by(id)) {
         return Ok(());
     }
-    let stdout = std::io::stdout();
-    let mut lock = stdout.lock();
-    let bytes = std::mem::take(&mut *buffer());
-    BUFFERED.store(false, Ordering::Relaxed);
-    if bytes.is_empty() {
+    let mut line = lock_line();
+    if only.is_some_and(|id| line.owner != id) || line.buf.is_empty() {
         return Ok(());
     }
-    if bytes.contains(&b'\n') {
-        // Lines left behind by a failed flush: std would retry them at its
-        // next flush; this is it.
-        return lock.write_all(&bytes);
-    }
-    let (head, last) = bytes.split_at(bytes.len() - 1);
-    lock.write_all(head)?;
-    lock.write_all(last)
+    let kind = classify(1);
+    let mut never = || Ok(());
+    let r = write_all(1, kind, &line.buf, &mut never);
+    let r = match r {
+        Ok(()) => {
+            line.buf.clear();
+            Ok(())
+        }
+        Err(s) => {
+            line.buf.drain(..s.written);
+            Err(match s.why {
+                WriteStop::Io(e) => e,
+                WriteStop::Limit(_) => std::io::ErrorKind::Interrupted.into(),
+            })
+        }
+    };
+    settle(&mut line);
+    r
 }
 
-/// At the end of a run under a time limit, with bytes left in the buffer:
-/// make sure the exit flush that will send them cannot block. Wait (asking
-/// `look`) until stdout has room for them; if `look` stops the wait, drop
-/// them and return its error. With room they stay where they are, as
-/// without a limit.
+/// At the end of a run under a time limit, with bytes of `id`'s in the line
+/// buffer: make sure the flush that will send them (the CLI's, or the
+/// interpreter's `Drop`) cannot block. Wait (asking `look`, holding the
+/// buffer so no other interpreter changes it meanwhile) until stdout has room
+/// for them; if `look` stops the wait, drop them and return its error. With
+/// room they stay where they are, as without a limit. Not this interpreter's
+/// buffer: nothing to do.
 pub(crate) fn ensure_room_at_end(
+    id: u64,
     kind: FdKind,
     look: &mut dyn FnMut() -> Result<(), PsError>,
 ) -> Result<(), PsError> {
-    let n = buffer().len();
-    if n == 0 {
+    if !owned_by(id) {
         return Ok(());
     }
+    let mut line = lock_within(&LINE, look)?;
+    if line.owner != id || line.buf.is_empty() {
+        return Ok(());
+    }
+    let n = line.buf.len();
     loop {
         if has_room(1, kind, n) {
             return Ok(());
         }
         if let Err(e) = look() {
-            buffer().clear();
-            BUFFERED.store(false, Ordering::Relaxed);
+            line.buf.clear();
+            settle(&mut line);
             return Err(e);
         }
         let _ = wait_writable(1);
     }
 }
 
-/// Write what [`BUFFER`] holds without waiting, for a process about to exit
-/// from another thread (the CLI's parent-gone watch): what the descriptor
-/// takes now is sent, the rest dropped. Never blocks on a lock: a thread
-/// stuck in a write holds them.
+/// Write what the line buffer holds for a process about to exit from another
+/// thread (the CLI's parent-gone watch), then drop it. No lock is waited on
+/// (the main thread may be stuck in a write holding it), and the write waits
+/// for room at most once, one polling interval: what stdout takes by then is
+/// sent, the rest dropped.
 pub(crate) fn drain_now() {
-    let Ok(mut buf) = BUFFER.try_lock() else {
-        return;
+    let mut line = match LINE.try_lock() {
+        Ok(line) => line,
+        Err(std::sync::TryLockError::Poisoned(p)) => p.into_inner(),
+        Err(std::sync::TryLockError::WouldBlock) => return,
     };
     let mut first = true;
-    let _ = write_all(1, classify(1), &buf, &mut || {
+    let kind = classify(1);
+    // Only a pipe or a socket ever filled it; a descriptor now of another
+    // kind (moved since) is not written, as a plain write there may block.
+    if kind == FdKind::Blocking {
+        line.buf.clear();
+        settle(&mut line);
+        return;
+    }
+    let _ = write_all(1, kind, &line.buf, &mut || {
         if std::mem::take(&mut first) {
             Ok(())
         } else {
             Err(PsError::Interrupted)
         }
     });
-    buf.clear();
-    BUFFERED.store(false, Ordering::Relaxed);
+    line.buf.clear();
+    settle(&mut line);
 }
 
 #[cfg(test)]

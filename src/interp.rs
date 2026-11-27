@@ -1466,6 +1466,11 @@ impl Interp {
         if limited {
             result = self.after_slice(result);
         }
+        // The run is over: under a time limit, make sure its buffered stdout
+        // cannot hold up the exit (#1457). If that wait runs out, the bytes
+        // are dropped; a run that had finished then reports the time limit,
+        // while one that already failed keeps its own error (`undefined`,
+        // `limitexceeded (steps)`, ...), which came first.
         #[cfg(unix)]
         if (result.is_err() || matches!(result, Ok(false)) || self.quit_requested)
             && let Err(e) = self.stdout_room_at_end()
@@ -4925,11 +4930,10 @@ impl Interp {
             let kind = self.fd_kind(2);
             if kind != crate::timed_write::FdKind::Blocking {
                 // std's stderr is unbuffered, so a direct write is what it
-                // does too; its lock keeps the bytes from interleaving with
-                // another thread's.
-                let _lock = std::io::stderr().lock();
-                return crate::timed_write::write_all(2, kind, bytes, &mut || self.write_look())
-                    .map_err(|stop| match stop.why {
+                // does too, serialised between threads by a lock taken
+                // within the deadline.
+                return crate::timed_write::stderr_write(kind, bytes, &mut || self.write_look())
+                    .map_err(|stop| match stop {
                         crate::timed_write::WriteStop::Limit(e) => e,
                         crate::timed_write::WriteStop::Io(_) => PsError::Io,
                     });
@@ -4958,10 +4962,12 @@ impl Interp {
     /// for the exit flush to outlast, and the host gets its run back at once.
     #[cfg(unix)]
     fn stdout_room_at_end(&self) -> Result<(), PsError> {
-        if !crate::timed_write::buffered() || self.limits.max_time.is_none() {
+        if !crate::timed_write::owned_by(self.host_id) || self.limits.max_time.is_none() {
             return Ok(());
         }
-        crate::timed_write::ensure_room_at_end(self.fd_kind(1), &mut || self.write_look())
+        crate::timed_write::ensure_room_at_end(self.host_id, self.fd_kind(1), &mut || {
+            self.write_look()
+        })
     }
 
     /// What fd 1 or fd 2 is this run, looked at once per run.
@@ -4997,7 +5003,14 @@ impl Interp {
 
     /// Program stdout on the timed path: through
     /// [`crate::timed_write::line_write`], std's line buffering on a write
-    /// that waits no longer than the limit.
+    /// that waits no longer than the limit; straight through while another
+    /// interpreter owns that buffer.
+    ///
+    /// std's own stdout buffer is not flushed first: nothing in pscat leaves
+    /// bytes there across a run (the CLI writes whole lines or flushes, and
+    /// the timed buffer is sent, not moved into std's), and its flush could
+    /// not be held to the deadline. An embedder's unflushed `print!` before
+    /// a run comes after the program's output.
     #[cfg(unix)]
     fn write_stdout_timed(
         &mut self,
@@ -5005,18 +5018,15 @@ impl Interp {
         bytes: &[u8],
         flush: bool,
     ) -> Result<(), PsError> {
-        use std::io::Write;
-        let stdout = std::io::stdout();
-        let mut lock = stdout.lock();
-        // Whatever the CLI left in std's own buffer goes first. It holds
-        // nothing during a run (the CLI writes before or after one, and
-        // `hand_over` leaves only what the next flush sends), so this is
-        // normally no I/O at all.
-        let mut written = lock.flush().map_err(crate::timed_write::WriteStop::Io);
-        if written.is_ok() {
-            written = crate::timed_write::line_write(kind, bytes, flush, &mut || self.write_look());
-        }
-        drop(lock);
+        let id = self.host_id;
+        let mut look = || self.write_look();
+        let written = match crate::timed_write::line_write(id, kind, bytes, flush, &mut look) {
+            Ok(crate::timed_write::LineWrite::Done) => Ok(()),
+            Ok(crate::timed_write::LineWrite::NotOwner) => {
+                crate::timed_write::direct_write(kind, bytes, &mut look)
+            }
+            Err(e) => Err(e),
+        };
         match written {
             Ok(()) => Ok(()),
             Err(crate::timed_write::WriteStop::Limit(e)) => Err(e),
@@ -5087,11 +5097,17 @@ impl Interp {
                     return self.write_stdout_timed(kind, bytes, flush);
                 }
             }
-            // Bytes a timed run left in its line buffer go first (one
-            // relaxed load when there are none).
+            // Bytes this interpreter's timed run left in the line buffer go
+            // first, as they would from std's buffer, and a failure to send
+            // them is this write's (one relaxed load when it owns none).
             #[cfg(unix)]
-            if crate::timed_write::buffered() {
-                let _ = crate::timed_write::hand_over();
+            if crate::timed_write::owned_by(self.host_id)
+                && let Err(e) = crate::timed_write::send_line(Some(self.host_id))
+            {
+                if e.kind() == std::io::ErrorKind::BrokenPipe {
+                    self.stdout_epipe_error = true;
+                }
+                return Err(PsError::Io);
             }
             let mut out = std::io::stdout();
             let written = out
@@ -5243,10 +5259,13 @@ impl Drop for Interp {
         // Before the early return below: a file kept alive by the leaked
         // dictionary graph would otherwise never be flushed.
         let _ = self.flush_files();
-        // Program stdout a timed run left in its line buffer: into std's
-        // own, which the exit flush sends (#1457). No I/O here.
+        // Program stdout this interpreter's timed run left in the line
+        // buffer goes now, as std's exit flush would send it (#1457); the
+        // end-of-run check made sure it has room. Another interpreter's
+        // bytes are not touched. A failure keeps them for the CLI's last
+        // flush to report.
         #[cfg(unix)]
-        let _ = crate::timed_write::hand_over();
+        let _ = crate::timed_write::send_line(Some(self.host_id));
         if self.keep_dicts_on_drop {
             return;
         }

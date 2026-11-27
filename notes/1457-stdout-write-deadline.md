@@ -86,18 +86,40 @@ the REPL, with and without `--max-time`, and compares the merged bytes.
 Bytes leave at the same operator as without a limit, and a write error is
 that operator's (`stopped` catches `ioerror` as before).
 
-The buffer is handed over to std's own buffer (`timed_write::hand_over`:
-a partial line under 1024 bytes, written in two pieces so std never takes
-its write-through path, so no I/O) before anything else writes to stdout:
-the CLI's `stdout_text`/`flush_stdout` (its own output and the REPL prompt),
-the interactive window's prompt, `--bands`' flush, the plain path's next
-write, and `Drop for Interp` (normal end, error, `quit`, panic unwinding).
-Then std's exit flush sends it, as it would have without a limit. The
+**Owned by one interpreter** (Codex round 2, R2). The buffer
+(`timed_write::LINE`) is process-wide, but one interpreter owns it at a time:
+the first to write while it is empty claims it (its `host_id`), and it is
+free again once empty. Another interpreter's timed writes meanwhile go
+straight to the descriptor (its own flush points, not std's: several
+interpreters sharing one stdout interleave as they write), its `Drop` and its
+plain path never touch the buffer, and only the owner does the end-of-run
+wait. The buffer and the stderr writers' lock are taken with `try_lock` and
+the run's deadline, never a blocking wait, so a short-budget interpreter
+cannot wait out a longer one stuck on the pipe.
+`tests/stdout_owner.rs` runs several interpreters in one process (a child
+copy of the test binary, stdout and stderr one pipe): dropping a captured or
+unrelated interpreter leaves the owner's partial line in place, and another
+timed interpreter's line goes out whole without joining it.
+
+**Sent, not moved** (Codex round 2, R1). The buffer is sent
+(`timed_write::send_line`), with no deadline, where std's buffer would be
+flushed: the CLI's `stdout_text` and `flush_stdout` (its own output, the REPL
+prompt, its last flush; `pscat::hand_over_stdout`), the interactive window's
+prompt, `--bands`' flush, the owner's plain-path writes and the owner's
+`Drop`. A send that fails keeps the bytes not written, as `flush_buf` does,
+and returns the error, so the CLI's last flush still sees a reader that went
+away: `f (A) writestring { f (\n) writestring } stopped { e (caught)
+writestring } if` with stdout closed exits 141 with and without a limit
+(`a_caught_flush_failure_still_fails_the_final_flush`). (The first round-1
+version moved the bytes into std's own buffer instead; std's `LineWriter`
+does not keep a line whose direct write fails, and the error was dropped.)
+Nothing is moved into std's buffer any more, so the timed path no longer
+flushes it either (that flush had no deadline): an embedder's unflushed
+`print!` from before a run comes after the program's output. The
 parent-gone watch, which calls `process::exit` from another thread, writes
-it without waiting first (`drain_now`, no locks waited on: the main thread
-may be stuck in a write). An embedder that writes to stdout itself while a
-timed run has a partial line buffered should call `pscat::hand_over_stdout`
-first (doc-hidden); otherwise its line can come before the program's.
+the buffer first without waiting on a lock (`drain_now`; the main thread may
+be stuck in a write holding it), waiting for room at most one polling
+interval.
 
 **End of a run.** A run that ends (finished, error, `quit`, a limit, found
 in the slice or at its start or end) with bytes in the buffer under a time
@@ -107,7 +129,8 @@ so the exit flush cannot hang. With room nothing is written there (the
 bytes leave when they would without a limit). Without room by the deadline
 the bytes are dropped and the run ends at its limit; a run that had
 finished reports `limitexceeded (time)` with the last operator it ran as
-the offending command
+the offending command, and one that had already failed keeps its own error
+(`undefined`, `limitexceeded (steps)`, ...), which came first
 (`a_full_pipe_at_the_end_of_a_run_does_not_outlast_the_limit`). With a host
 interrupt flag and no time limit there is no such wait: the run returns at
 once, and the bytes wait for the exit flush as without the flag (the writes
@@ -154,11 +177,12 @@ path's.
   (`--png`/`--svg`/`--pdf` take a file name).
 - A terminal stopped with XOFF (Ctrl-S), a named FIFO on macOS and a
   datagram socket block as before.
-- A timed write first flushes std's own stdout buffer, without a deadline.
-  In the CLI that buffer is empty during a run; an embedder that leaves bytes
-  in it (writing without a newline, or another `Interp` dropped mid-way, which
-  hands its line over) and then runs a program into a full pipe can block
-  there.
+- Several interpreters in one process writing to one stdout: only the
+  owner of the line buffer keeps std's flush points; the others write
+  straight through.
+- Sending the buffer at the CLI's flush points and in the owner's `Drop`
+  waits for the reader as std's flush does; the end-of-run check has made
+  sure it has room for those at most 1024 bytes, for a single writer.
 - No test drives a panic: the CLI has no trigger for one. The mechanism is
   `Drop for Interp` running while it unwinds, with a lock that tolerates
   poisoning.

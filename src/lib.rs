@@ -277,20 +277,25 @@ pub mod write_roots;
 pub use error::PsError;
 pub use interp::Interp;
 
-/// Hand program stdout a timed run left in its line buffer over to std's
-/// own stdout buffer (#1457), before writing to stdout yourself: the CLI
-/// calls it ahead of its own output and prompts, so the two keep the order
-/// they have without a time limit. No I/O while std's buffer is empty;
-/// a no-op off unix and when nothing is held.
+/// Send program stdout a timed run left in its line buffer (#1457), as a
+/// flush of std's stdout would, before writing to stdout yourself: the CLI
+/// calls it ahead of its own output, its prompts and its last flush, so the
+/// two keep the order they have without a time limit. A write that fails
+/// keeps the bytes and returns the error (a reader that went away is
+/// `BrokenPipe`), so a later call fails again, as std's flush does. Waits
+/// for the reader like a plain write; `Ok` off unix and when nothing is held.
 #[doc(hidden)]
-pub fn hand_over_stdout() {
+pub fn hand_over_stdout() -> std::io::Result<()> {
     #[cfg(unix)]
-    let _ = timed_write::hand_over();
+    return timed_write::send_line(None);
+    #[cfg(not(unix))]
+    Ok(())
 }
 
-/// Write what a timed run left in its stdout line buffer without waiting
-/// or taking a lock (#1457), for a thread about to `process::exit` while
-/// the interpreter may be blocked; what does not fit at once is dropped.
+/// Write what a timed run left in its stdout line buffer, for a thread
+/// about to `process::exit` while the interpreter may be blocked (#1457):
+/// no lock is waited on, and the write waits for room at most one polling
+/// interval (10 ms); what stdout has not taken by then is dropped.
 #[doc(hidden)]
 pub fn drain_stdout_now() {
     #[cfg(unix)]

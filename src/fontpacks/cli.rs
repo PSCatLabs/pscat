@@ -30,6 +30,8 @@ fn stdout_line(args: std::fmt::Arguments<'_>) {
     if stdout_closed() {
         return;
     }
+    // No `pscat::hand_over_stdout` needed: `pscat fonts` runs no program,
+    // so the timed stdout buffer (#1457) is never used in this process.
     let mut out = std::io::stdout().lock();
     if let Err(e) = out.write_fmt(args).and_then(|()| out.write_all(b"\n")) {
         if e.kind() != std::io::ErrorKind::BrokenPipe {

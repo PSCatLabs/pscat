@@ -57,9 +57,9 @@ fn stdout_is_closed() -> bool {
 
 /// Flush stdout, noting a reader that has gone like [`stdout_text`].
 fn flush_stdout() {
-    // A timed run's held-back stdout first, into std's buffer (#1457).
-    pscat::hand_over_stdout();
-    if let Err(e) = io::stdout().flush()
+    // A timed run's held-back stdout first (#1457); its failure is this
+    // flush's, as it would be from std's buffer.
+    if let Err(e) = pscat::hand_over_stdout().and_then(|()| io::stdout().flush())
         && e.kind() == io::ErrorKind::BrokenPipe
     {
         note_stdout_closed();
@@ -91,9 +91,9 @@ fn stdout_text(args: std::fmt::Arguments<'_>) {
         return;
     }
     // Program stdout a timed run held back comes before the CLI's own
-    // (#1457), as it does without a limit.
-    pscat::hand_over_stdout();
-    if let Err(e) = io::stdout().lock().write_fmt(args) {
+    // (#1457), as it does without a limit, and a failure to send it fails
+    // this write, as std's buffered bytes would.
+    if let Err(e) = pscat::hand_over_stdout().and_then(|()| io::stdout().lock().write_fmt(args)) {
         if e.kind() != io::ErrorKind::BrokenPipe {
             panic!("failed printing to stdout: {e}");
         }

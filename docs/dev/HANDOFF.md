@@ -1784,11 +1784,13 @@ renders eight examples in both and compares block-downsampled output).
     bigger than the room (Linux: `pwritev2(RWF_NOWAIT)`; macOS: `fstat`'s free
     space, letting a full pipe grow 16 -> 64 KiB; `send(MSG_DONTWAIT)` on a
     Linux socket), never `O_NONBLOCK` (the description is shared). Stdout
-    keeps std's `LineWriter` rules exactly in `timed_write::BUFFER` (1024
-    bytes, process-wide), so `2>&1` order and the operator a write error
-    surfaces in are the plain path's; never flush it at a slice end. Anything
-    else that writes to stdout calls `pscat::hand_over_stdout()` first (the
-    CLI's `stdout_text`/`flush_stdout`, the window prompt, bands, `Drop`). A
+    keeps std's `LineWriter` rules exactly in `timed_write::LINE` (1024
+    bytes, owned by one `Interp` at a time), so `2>&1` order and the operator
+    a write error surfaces in are the plain path's; never flush it at a slice
+    end. Anything else that writes to stdout sends it first with
+    `pscat::hand_over_stdout()` and passes its error on (the CLI's
+    `stdout_text`/`flush_stdout`, the window prompt, bands; the owner's `Drop`
+    sends its own). A
     new writer to fd 1 or 2 goes through those two methods and passes their
     `PsError` up unchanged (a `map_err` to `Io` would make the stop
     catchable). No limit, a file, a terminal, a datagram socket, a macOS named
