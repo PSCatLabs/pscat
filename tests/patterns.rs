@@ -1755,8 +1755,8 @@ fn pen_space_strokes_and_a_type1_background_agree_with_gs() {
 /// A radial whose circles are not nested and whose end does not extend,
 /// cut to a `/BBox`: the raster paints a point's smaller root where its
 /// larger one is past the end (`two_root_layer`), as gs and PDF do. SVG
-/// cannot ask for the smaller root (the gap `shfill` has too), so only the
-/// raster and the PDF are held against gs.
+/// has only the larger root, so it paints the smaller one from a second
+/// gradient beneath (#1370).
 const SHADED_TWO_ROOTS: &str = "
 << /PatternType 2 /Shading << /ShadingType 3 /ColorSpace /DeviceRGB /Coords [160 200 20 260 200 60]
    /Function ramp /Extend [true false] /BBox [60 60 340 340] >> >> matrix makepattern setpattern
@@ -1768,6 +1768,12 @@ fn a_radial_pattern_paints_its_smaller_root_as_gs_does() {
     let src = format!("{RAMP}{SHADED_TWO_ROOTS}");
     let out = render(&src);
     assert!(pdf_text(&out.pdf).contains("/PatternType 2 "));
+    assert_close(
+        "two roots: SVG via resvg",
+        &out.png,
+        &resvg_png(&out.svg),
+        3.0,
+    );
     if common::gs_available() {
         let ps = format!("%!PS\n{src}\nshowpage\n");
         let program = gs_png(ps.as_bytes(), "ps", "two roots");
@@ -1779,6 +1785,33 @@ fn a_radial_pattern_paints_its_smaller_root_as_gs_does() {
             3.0,
         );
     }
+}
+
+/// The same radial with no `/BBox` and no `/Background`: the pattern is
+/// the gradient itself in SVG for an ordinary one, but a cone needs both
+/// roots, so it is a `<pattern>` over the canvas (#1370).
+#[test]
+fn a_radial_pattern_without_a_bbox_paints_its_smaller_root_in_svg() {
+    let src = format!(
+        "{RAMP}<< /PatternType 2 /Shading << /ShadingType 3 /ColorSpace /DeviceRGB \
+         /Coords [160 200 20 260 200 60] /Function ramp /Extend [true false] >> >> \
+         matrix makepattern setpattern 20 20 360 360 rectfill"
+    );
+    let out = render(&src);
+    assert_close(
+        "two roots, no box: SVG via resvg",
+        &out.png,
+        &resvg_png(&out.svg),
+        3.0,
+    );
+    // A nested radial (no second root) stays the gradient itself.
+    let nested = format!(
+        "{RAMP}<< /PatternType 2 /Shading << /ShadingType 3 /ColorSpace /DeviceRGB \
+         /Coords [200 200 20 200 200 100] /Function ramp /Extend [true false] >> >> \
+         matrix makepattern setpattern 20 20 360 360 rectfill"
+    );
+    let out = render(&nested);
+    assert!(!out.svg.contains("<pattern "), "{}", out.svg);
 }
 
 #[test]

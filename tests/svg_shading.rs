@@ -26,7 +26,7 @@ const HARD_EDGES: &str = "/Function << /FunctionType 3 /Domain [0 1] /Bounds [0 
 const EXTENDS: [&str; 4] = ["false false", "true false", "false true", "true true"];
 
 /// (name, what goes before the dictionary, the dictionary's own keys).
-const CASES: [(&str, &str, &str); 13] = [
+const CASES: [(&str, &str, &str); 15] = [
     ("edges", "", "/ShadingType 2 /Coords [100 0 400 0]"),
     (
         "equal",
@@ -83,6 +83,18 @@ const CASES: [(&str, &str, &str); 13] = [
         "max-radial-shrink",
         "",
         "/ShadingType 3 /Coords [250 250 3e38 250 250 1e38]",
+    ),
+    // Circles neither inside the other: a point can lie on two of them, and
+    // gs paints the larger t in range (#1370).
+    (
+        "cone-grow",
+        "",
+        "/ShadingType 3 /Coords [160 250 20 260 250 60]",
+    ),
+    (
+        "cone-shrink",
+        "",
+        "/ShadingType 3 /Coords [260 250 60 160 250 20]",
     ),
 ];
 
@@ -335,5 +347,41 @@ fn each_degenerate_case_writes_what_the_png_paints() {
             );
             assert!(attr(d, "r").is_finite(), "{name} [{ext}]: {d}");
         }
+    }
+}
+
+/// A radial whose circles are not nested, its end not extended (#1370): a
+/// point whose larger root is past the end is painted from its smaller one,
+/// as the PNG, the PDF and gs do. SVG's gradient has only the larger root,
+/// so the smaller root is a second gradient (the same circles run
+/// backwards) painted first, and the larger over it. A cone that does not
+/// need it, with its end extended, is one gradient as before.
+#[test]
+fn a_cone_with_its_end_not_extended_paints_its_smaller_root_first() {
+    for case in [13, 14] {
+        let (name, pre, dict) = CASES[case];
+        for ext in ["false false", "true false"] {
+            let (_, svg) = png_and_svg(&program(name, pre, dict, ext));
+            assert_eq!(svg.matches("<radialGradient").count(), 2, "{name} [{ext}]: {svg}");
+            assert_eq!(svg.matches("fill=\"url(#").count(), 2, "{name} [{ext}]: {svg}");
+        }
+        for ext in ["false true", "true true"] {
+            let (_, svg) = png_and_svg(&program(name, pre, dict, ext));
+            assert_eq!(svg.matches("<radialGradient").count(), 1, "{name} [{ext}]: {svg}");
+        }
+        // The hole: a point right of the end circle (260, 250), 110 from
+        // the start circle's centre, where the larger root is past the end.
+        // The PNG paints it; so must the SVG.
+        let (png, svg) = png_and_svg(&program(name, pre, dict, "true false"));
+        let theirs = resvg_raster(&svg);
+        let mut hole = 0;
+        for y in 0..SIZE {
+            for x in 0..SIZE {
+                if rgb(&png, x, y) != [128, 128, 128] && rgb(&theirs, x, y) == [128, 128, 128] {
+                    hole += 1;
+                }
+            }
+        }
+        assert_eq!(hole, 0, "{name}: {hole} pixels the PNG paints are bare in the SVG");
     }
 }

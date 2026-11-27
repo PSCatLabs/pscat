@@ -278,8 +278,12 @@ impl SvgRecorder {
         let as_row = |t: tiny_skia::Transform| [t.sx, t.ky, t.kx, t.sy, t.tx, t.ty];
         let prefix = self.prefix.clone();
         let paint = match (&form.gradient, &form.image) {
+            // A cone's smaller root is a second gradient (#1370), which
+            // takes the canvas `<pattern>` below, not one `url(#…)`.
             (Some((kind, ctm, stops, extend)), _)
-                if form.bbox.is_none() && form.background.is_none() =>
+                if form.bbox.is_none()
+                    && form.background.is_none()
+                    && !needs_smaller_root(kind, *extend) =>
             {
                 match self.gradient_def(kind, as_row(to_here.pre_concat(*ctm)), stops, *extend) {
                     Some(id) => format!("url(#{prefix}g{id})"),
@@ -324,13 +328,14 @@ impl SvgRecorder {
                         Self::color(rgb)
                     );
                 }
-                if let Some((kind, ctm, stops, extend)) = &form.gradient
-                    && let Some(id) = self.gradient_def(kind, as_row(*ctm), stops, *extend)
-                {
-                    let _ = write!(
-                        content,
-                        "<path d=\"{region}\" fill=\"url(#{prefix}g{id})\"/>"
-                    );
+                if let Some((kind, ctm, stops, extend)) = &form.gradient {
+                    let ids = self.gradient_defs(kind, as_row(*ctm), stops, *extend);
+                    for id in ids {
+                        let _ = write!(
+                            content,
+                            "<path d=\"{region}\" fill=\"url(#{prefix}g{id})\"/>"
+                        );
+                    }
                 }
                 if let Some((png, iw, ih, x, y)) = &form.image {
                     let _ = write!(
@@ -934,16 +939,70 @@ impl SvgRecorder {
         chain: &Chain,
     ) {
         self.flush_text();
-        let Some(id) = self.gradient_def(kind, ctm, stops, extend) else {
+        let ids = self.gradient_defs(kind, ctm, stops, extend);
+        if ids.is_empty() {
             return;
-        };
+        }
         let (open, close, leftover) = self.clip_wrappers(chain, Self::blend_style(comp.blend));
-        let _ = write!(
-            self.body,
-            "{open}<path d=\"{region_d}\" fill=\"url(#{}g{id})\"{}{leftover}/>{close}",
-            self.prefix,
-            Self::opacity_attr(comp, false),
-        );
+        // The smaller root's gradient, when there is one, is painted first
+        // and the larger over it (#1370). Both go in one group that carries
+        // the mark's opacity and blend, so a translucent mark composites
+        // once, as the raster's two-root layer does, not twice where the
+        // roots overlap.
+        let mut paths = String::new();
+        match ids[..] {
+            [under, over] => {
+                let opacity = if comp.alpha >= 1.0 {
+                    String::new()
+                } else {
+                    format!(" opacity=\"{}\"", fmt_f32(comp.alpha))
+                };
+                let _ = write!(
+                    paths,
+                    "<g{opacity}{leftover}><path d=\"{region_d}\" fill=\"url(#{p}g{under})\"/>\
+                     <path d=\"{region_d}\" fill=\"url(#{p}g{over})\"/></g>",
+                    p = self.prefix,
+                );
+            }
+            [id] => {
+                let _ = write!(
+                    paths,
+                    "<path d=\"{region_d}\" fill=\"url(#{}g{id})\"{}{leftover}/>",
+                    self.prefix,
+                    Self::opacity_attr(comp, false),
+                );
+            }
+            _ => {}
+        }
+        let _ = write!(self.body, "{open}{paths}{close}");
+    }
+
+    /// The gradients `shfill` paints, in paint order (#1370): one, or for a
+    /// radial whose circles are not nested and whose end does not extend,
+    /// the smaller root's gradient first and the ordinary one over it.
+    /// SVG paints only the largest of its own `t` that a point's circles
+    /// reach, which is PostScript's larger `t`; where that one is past the
+    /// end the raster, PDF and gs paint the smaller, so it is a second
+    /// gradient, the same circles run backwards. Empty when the numbers
+    /// have no SVG spelling (nothing is written, as for `gradient_def`).
+    fn gradient_defs(
+        &mut self,
+        kind: &ShKind,
+        ctm: [f32; 6],
+        stops: &[(f32, f32, f32, f32)],
+        extend: [bool; 2],
+    ) -> Vec<usize> {
+        let Some(main) = self.gradient_def(kind, ctm, stops, extend) else {
+            return Vec::new();
+        };
+        if !needs_smaller_root(kind, extend) {
+            return vec![main];
+        }
+        let (back_kind, back_stops, back_extend) = run_backwards(kind, stops, extend);
+        match self.gradient_def(&back_kind, ctm, &back_stops, back_extend) {
+            Some(under) => vec![under, main],
+            None => vec![main],
+        }
     }
 
     /// `shfill`'s gradient def (#20), its id number (`{prefix}g{id}`), or
@@ -960,6 +1019,7 @@ impl SvgRecorder {
         // number. Then it is done at an eighth of the size, the transform
         // multiplying it back (a power of two, so exact); if even that is
         // not finite, nothing is written, as the PDF writes nothing.
+        let cone = is_cone(kind);
         let mut ctm = ctm;
         let mut extended = extended_for_svg(kind, stops, extend);
         if !sh_finite(&extended.0) {
@@ -1050,10 +1110,27 @@ impl SvgRecorder {
                 // uncontained case (e.g. rasterizing just that
                 // gradient into an embedded PNG, the way `image`
                 // already embeds bitmap content) is out of scope here.
-                let (outer_x, outer_y, outer_r, focal_x, focal_y, focal_r, shrinking) = if r0 > r1 {
+                //
+                // A cone (circles not nested, #1370) is not swapped: SVG
+                // paints the largest of its own `t` a point's circles
+                // reach, so which circle is the focal one decides which of
+                // a point's two roots shows (the larger PostScript `t` for
+                // the start as focal). Chrome and resvg both take `fr > r`
+                // as a canvas gradient does, as the cone needs.
+                let swap = r0 > r1 && !cone;
+                let (outer_x, outer_y, outer_r, focal_x, focal_y, focal_r, shrinking) = if swap {
                     (x0, y0, r0, x1, y1, r1, true)
                 } else {
                     (x1, y1, r1, x0, y0, r0, false)
+                };
+                // An outer radius of 0 is SVG's "paint the last stop
+                // everywhere", which a cone shrinking to a point would
+                // get; a hair of radius keeps the cone, to a pixel's worth.
+                let outer_r = if cone && outer_r <= 0.0 {
+                    let reach = r0.max(r1).max(crate::fmath::hypotf(x1 - x0, y1 - y0));
+                    (reach * CONE_APEX_RADIUS).max(1e-4)
+                } else {
+                    outer_r
                 };
                 let tags = if shrinking {
                     let mut reversed: Vec<SvgStop> = stops
@@ -1382,6 +1459,73 @@ fn extended_for_svg(
         },
     };
     (kind, out)
+}
+
+/// The radius a cone's outer circle gets in place of 0, as a share of the
+/// cone's reach (`gradient_def`).
+const CONE_APEX_RADIUS: f32 = 1e-5;
+
+/// Whether `kind` is a radial whose circles are neither inside the other,
+/// so a point can lie on two of them (the test `gradient_parts` makes for
+/// the raster).
+fn is_cone(kind: &ShKind) -> bool {
+    match *kind {
+        ShKind::Axial { .. } => false,
+        ShKind::Radial {
+            x0,
+            y0,
+            r0,
+            x1,
+            y1,
+            r1,
+        } => crate::fmath::hypotf(x1 - x0, y1 - y0) > (r1 - r0).abs(),
+    }
+}
+
+/// Whether the SVG needs a second gradient for `kind` under `extend`: a
+/// cone whose end does not extend, where a point's larger root can fall
+/// past the end and its smaller one is painted (`gradient_parts`).
+pub(crate) fn needs_smaller_root(kind: &ShKind, extend: [bool; 2]) -> bool {
+    !extend[1] && is_cone(kind)
+}
+
+/// The same shading run the other way: its circles swapped, the stops
+/// mirrored and the ends exchanged. Its larger root is the original's
+/// smaller one.
+fn run_backwards(
+    kind: &ShKind,
+    stops: &[(f32, f32, f32, f32)],
+    extend: [bool; 2],
+) -> (ShKind, Vec<(f32, f32, f32, f32)>, [bool; 2]) {
+    let kind = match *kind {
+        ShKind::Axial { x0, y0, x1, y1 } => ShKind::Axial {
+            x0: x1,
+            y0: y1,
+            x1: x0,
+            y1: y0,
+        },
+        ShKind::Radial {
+            x0,
+            y0,
+            r0,
+            x1,
+            y1,
+            r1,
+        } => ShKind::Radial {
+            x0: x1,
+            y0: y1,
+            r0: r1,
+            x1: x0,
+            y1: y0,
+            r1: r0,
+        },
+    };
+    let stops = stops
+        .iter()
+        .rev()
+        .map(|&(t, r, g, b)| (1.0 - t, r, g, b))
+        .collect();
+    (kind, stops, [extend[1], extend[0]])
 }
 
 /// Whether every number of `kind` is finite.
