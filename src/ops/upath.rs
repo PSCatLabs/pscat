@@ -4,7 +4,7 @@
 //!
 //! A user path is an array of numbers and the operators `moveto lineto
 //! rmoveto rlineto curveto rcurveto arc arcn arct closepath`, led by
-//! `[ucache] llx lly urx ury setbbox`. [`append_userpath`] runs it the way
+//! `[ucache] llx lly urx ury setbbox`. `append_userpath` runs it the way
 //! Ghostscript does: each operator is the path operator of that name under
 //! the box `setbbox` set, so a point past the box is a `rangecheck`, and a
 //! user path that fails leaves the current path as it was. The operators
