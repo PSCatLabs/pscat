@@ -135,6 +135,17 @@ catch (e) { if (e instanceof PostScriptError) console.log(e.errorName); } // 'un
   was raised inside a `run` file (`line` is then that file's line; both are
   undefined for an error in the main program), the full `report`, what the
   program printed first, and the font `warnings` up to the error. The renderer stays usable afterwards.
+- **Limits** (since 0.8.0): `maxSteps: N` in the page options caps the steps
+  the whole program may run, and `frameMaxSteps: N` in `frames()` caps each
+  frame, as the playground does. Over the cap the run throws a
+  `PostScriptError` with `errorName` `'limitexceeded'`; `r.stepsUsed` reads the
+  count (0 with no cap). Both are off by default. A cap is coarse: it is
+  enforced between slices of up to 4096 steps, so a run or a frame can end
+  over it by less than a slice, and a `frameMaxSteps` below 4096 can let small
+  frames each overrun it without an error. The module has no clock, so
+  steps, which include a step per KiB of decoded filter data, are the only
+  limit that stops an endless loop or a decompression bomb
+  (`npm/README.md`, "Limiting a run", #1223).
 - `output` is what the program printed (`=`, `==`, `print`, `stack`).
 - `pageCount()` is the number of pages the run holds now: those `showpage`
   or `copypage` emitted, plus the page being drawn when it has art on it (or
