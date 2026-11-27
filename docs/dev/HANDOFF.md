@@ -2010,12 +2010,13 @@ renders eight examples in both and compares block-downsampled output).
   depth at each source-token boundary in `sync_scan_line` into `lint::StackTrace` (runs, not
   per item, at most 1024) and credits what the token left to its line. #1366
   (`notes/1366-stack-leak-own-line.md`) names the leaking *element's* line instead (a loop
-  body's, a procedure's), from the #1405 table: `step_n` runs `step_n_traced`, a third copy of
-  the step loop (change all three with `step_n_inner` and `step_n_timed`), while tracing; before
-  each step `note_stack_step` keeps the lowest depth since the token boundary and the element
-  that pushed the item above it, as a `storage_site` resolved to a line only when the finding is
-  made, and only if it was written in the text being scanned (a library's line is not named; its
-  call is). The plain loop is untouched.
+  body's, a procedure's), from the #1405 table: while tracing, `step_n` runs `step_n_timed` (the
+  `--profile-ops` copy of the step loop; it does not fuse `{ } if`, which is most of the lint's
+  cost), and before each step `note_stack_step` keeps the lowest depth since the token boundary
+  and the element that pushed the item above it, as a `storage_site` resolved to a line only when
+  the finding is made, and only if it was written in the text being scanned (a library's line is
+  not named; its call is). The plain loop is untouched: a third copy of it cost the plain path
+  2% in instructions (inlining shifts), so do not add one.
   `[utf8-in-byte-font]` (#1412, `notes/1412-lint-utf8-in-byte-font.md`) reads
   `Interp::trace_utf8_text` (on under `--lint`): `Interp::begin_show`, which every
   show-family operator reaches, passes the string and font to `font::utf8_in_byte_font`,

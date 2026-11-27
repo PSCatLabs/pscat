@@ -600,6 +600,10 @@ pub struct Interp {
     /// `[stack-leak]` can name the line that left the oldest item. `None`
     /// otherwise, which costs `sync_scan_line` one branch.
     stack_trace: Option<Box<crate::lint::StackTrace>>,
+    /// Whether `step_n` runs a slice in the instrumented copy of the step
+    /// loop, `step_n_timed`: `--profile-ops` times operators, or `--lint`
+    /// traces stack leaks (#1366). One flag, so the plain path tests one byte.
+    instrumented: bool,
     /// Operator names a program tried to overwrite in the read-only
     /// systemdict (issue #1337), with the type of value it tried to store:
     /// the `[shadowed-operator]` lint reports them, since the store itself
@@ -962,6 +966,7 @@ impl Interp {
             source_lines: Box::default(),
             main_file_name: None,
             stack_trace: None,
+            instrumented: false,
             refused_system_stores: Default::default(),
             error_chain: Vec::new(),
             font_notes_shown: std::collections::HashSet::new(),
@@ -1497,12 +1502,10 @@ impl Interp {
         };
         // `--profile-ops` times every operator, in its own copy of the loop
         // (checked once per slice, so the plain loop carries no per-step test).
-        // `--lint` samples the operand stack after every step in another copy
-        // (#1366); the profile wins when both are on.
-        let mut result = if self.profile.as_deref().is_some_and(|p| p.ops_on()) {
-            self.step_n_timed(budget)
-        } else if self.stack_trace.is_some() {
-            let result = self.step_n_traced(budget);
+        // `--lint` samples the operand stack after every step in the same copy
+        // (#1366).
+        let mut result = if self.instrumented {
+            let result = self.step_n_timed(budget);
             // The last step of the slice ran after the last sample.
             self.note_stack_step(false);
             result
@@ -1883,11 +1886,16 @@ impl Interp {
         // `slice_budget` then counts the steps run (#1213).
         self.slice_left = 0;
         self.slice_budget = 0;
+        let timing = self.profile.as_deref().is_some_and(|p| p.ops_on());
+        let tracing = self.stack_trace.is_some();
         for _ in 0..budget {
             self.slice_budget += 1;
             if self.quit_requested {
                 self.slice_budget -= 1;
                 return Ok(false);
+            }
+            if tracing {
+                self.note_stack_step(true);
             }
             let mut step = self.proc_step::<true>();
             if let ProcStep::Other = step {
@@ -1899,8 +1907,10 @@ impl Interp {
                     Ok(Some(Item::Proc)) => step = self.proc_step::<true>(),
                     Ok(Some(Item::Obj(obj))) => {
                         let done = match (&obj.value, obj.executable) {
-                            (Value::Name(n), true) => self.execute_name_timed(n.id()),
-                            (Value::Operator(op), true) => self.timed_op(op.name, op.func),
+                            (Value::Name(n), true) if timing => self.execute_name_timed(n.id()),
+                            (Value::Operator(op), true) if timing => {
+                                self.timed_op(op.name, op.func)
+                            }
                             _ => self.execute_element(obj),
                         };
                         if let Err(e) = done {
@@ -1920,8 +1930,10 @@ impl Interp {
                 // (and never fused here, `slice_left` being zero).
                 ProcStep::Lit => self.proc_literal(),
                 ProcStep::Src => self.proc_source(),
-                ProcStep::Op(func) => self.timed_op(self.op_name, func),
-                ProcStep::Name(id) => self.execute_name_timed(id),
+                ProcStep::Op(func) if timing => self.timed_op(self.op_name, func),
+                ProcStep::Op(func) => self.run_op(func, ""),
+                ProcStep::Name(id) if timing => self.execute_name_timed(id),
+                ProcStep::Name(id) => self.execute_name(id),
                 ProcStep::Pushed | ProcStep::Other => continue,
             };
             if let Err(e) = done {
@@ -1956,8 +1968,8 @@ impl Interp {
         self.execute_resolved(resolved, id)
     }
 
-    // `step_n_timed` (`--profile-ops`) and `step_n_traced` (`--lint`) are copies
-    // of this loop: change all three.
+    // `step_n_timed` is a copy of this loop (`--profile-ops`, and `--lint`'s stack
+    // trace): change both.
     fn step_n_inner(&mut self, budget: usize) -> Result<bool, PsError> {
         // An explicit count of the steps left, so a fused run of several
         // elements (#864) can charge each of them.
@@ -1976,71 +1988,6 @@ impl Interp {
             // loop iteration (or a frame finishing) leaves a procedure on
             // top: its first element runs in this same step, as it always
             // has.
-            let done = match self.proc_step::<false>() {
-                ProcStep::Op(func) => self.run_op(func, ""),
-                ProcStep::Name(id) => self.execute_name(id),
-                ProcStep::Src => self.proc_source(),
-                ProcStep::Pushed | ProcStep::Lit => continue,
-                ProcStep::Other => match self.next_item() {
-                    Ok(None) => {
-                        // The pass that finds the program done runs no
-                        // object: not a step (#1213).
-                        self.slice_left += 1;
-                        return Ok(false);
-                    }
-                    Ok(Some(Item::Obj(obj))) => self.execute_element(obj),
-                    Ok(Some(Item::Proc)) => match self.proc_step::<false>() {
-                        ProcStep::Op(func) => self.run_op(func, ""),
-                        ProcStep::Name(id) => self.execute_name(id),
-                        ProcStep::Src => self.proc_source(),
-                        // `Other`: a run of empty loop iterations paused
-                        // with no procedure on top (#900), a step that
-                        // did nothing.
-                        ProcStep::Pushed | ProcStep::Lit | ProcStep::Other => continue,
-                    },
-                    Err(e) => {
-                        // A scan/syntax error short-circuits out of
-                        // next_item before any Action ran, so the failing
-                        // Scanner frame is still on top with its line set.
-                        self.sync_scan_line();
-                        self.recover(e)?;
-                        continue;
-                    }
-                },
-            };
-            if let Err(e) = done {
-                self.recover(e)?;
-            }
-        }
-        Ok(!self.estack.is_empty())
-    }
-
-    /// [`step_n_inner`](Self::step_n_inner) with the operand stack sampled
-    /// before every step, for `--lint`'s `[stack-leak]` line (#1366: the
-    /// element that left the item, not the loop or call that ran it). Kept as
-    /// a copy for the reason `step_n_timed` is: the plain loop stays exactly
-    /// as the compiler had it, and a run that does not lint pays one check per
-    /// slice. Fusing and the step count are the plain loop's.
-    #[inline(never)]
-    fn step_n_traced(&mut self, budget: usize) -> Result<bool, PsError> {
-        // An explicit count of the steps left, so a fused run of several
-        // elements (#864) can charge each of them.
-        self.slice_left = budget;
-        self.slice_budget = budget;
-        while self.slice_left > 0 {
-            self.slice_left -= 1;
-            if self.quit_requested {
-                // Nothing ran: not a step (#1213).
-                self.slice_left += 1;
-                return Ok(false);
-            }
-            // A procedure element (nearly every step of a bound library)
-            // is dispatched straight from the frame. Anything else goes
-            // through `next_item`, which hands back `Item::Proc` when a
-            // loop iteration (or a frame finishing) leaves a procedure on
-            // top: its first element runs in this same step, as it always
-            // has.
-            self.note_stack_step(true);
             let done = match self.proc_step::<false>() {
                 ProcStep::Op(func) => self.run_op(func, ""),
                 ProcStep::Name(id) => self.execute_name(id),
@@ -3251,6 +3198,7 @@ impl Interp {
     pub fn enable_profile_ops(&mut self) {
         if let Some(p) = self.profile.as_mut() {
             p.set_ops();
+            self.instrumented = true;
         }
     }
 
@@ -3987,6 +3935,7 @@ impl Interp {
     #[doc(hidden)]
     pub fn trace_stack_leaks(&mut self) {
         self.stack_trace.get_or_insert_with(Default::default);
+        self.instrumented = true;
     }
 
     pub(crate) fn stack_trace(&self) -> Option<&crate::lint::StackTrace> {

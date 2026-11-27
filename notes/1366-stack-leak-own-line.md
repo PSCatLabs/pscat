@@ -26,9 +26,9 @@ are as before.
 The old trace sampled the operand depth only when the scanner was about to read a
 token, so everything a token ran (a loop, a call) was one lump. Two things now:
 
-1. **`Interp::step_n_traced`**, a copy of the plain step loop used only while
-   `--lint` is tracing (`step_n_timed` is the same idea for `--profile-ops`; with
-   both on the profile wins and the lint falls back to the token line). Before each
+1. **`step_n_timed`**, the existing copy of the step loop that `--profile-ops` uses, now
+   also runs while `--lint` is tracing (`Interp::instrumented`, one flag, tells `step_n`;
+   with a profile's timing on too, the loop times operators as before). Before each
    step, `note_stack_step` makes constant work: it notes the lowest the operand
    depth has been since the last token boundary (`low`), and, when an item has
    appeared at that low point, which procedure element pushed it. The element is the one the previous
@@ -83,9 +83,9 @@ has dropped its caller's frame anyway.
 
 - Per step: a depth comparison, and a handful of stores. Nothing is looked up or
   allocated, so the work is charged to the step it is in (`--max-steps`,
-  `--max-time` and `--max-memory` see the same steps as before: the traced loop fuses
-  `{ } if` as the plain loop does and counts steps the same, test
-  `tracing_the_stack_changes_no_step_count_or_result`).
+  `--max-time` and `--max-memory` see the same steps as before: the instrumented loop does
+  not fuse `{ } if`, but a fused run is charged one step per element, so the count is the
+  same, test `tracing_the_stack_changes_no_step_count_or_result`).
 - The runs are at most 1024 (`MAX_RUNS`). Before, a program that leaked from a million
   different lines held a million runs; now the newest items past the cap share the last
   run's origin. Test `a_program_that_leaks_from_every_line_keeps_the_trace_bounded`.
@@ -93,27 +93,30 @@ has dropped its caller's frame anyway.
 
 ## Cost
 
-`--profile ci` binaries, base = `origin/feature/0.8.0` at `b038048f`, head = this branch,
-`/usr/bin/time -l` instructions retired (the figure is stable; wall time is not):
+`--release` binaries, base = the merge base with `origin/feature/0.8.0` (`1f4a6269`), head =
+this branch, `/usr/bin/time -l` instructions retired (the figure is stable; wall time is not):
 
 | program | mode | base | head |
 | --- | --- | --- | --- |
-| 13.5M-token flat file (`1 2 add pop 3 4 mul pop` x 1.5M) | plain | 18 720M | 18 740M |
-| same | `--lint` | 20 510M | 21 250M (+3.6%) |
-| `0 1 3000000 { /x exch def } for` | plain | 3 764M | 3 765M |
-| same | `--lint` | 3 984M | 4 358M (+9%) |
-| `/f { 1 pop } def 0 1 10000000 { pop f } for` | plain | 13 260M | 13 261M |
-| same | `--lint` | 13 257M | 14 766M (+11%) |
-| `gallery/alpine_lake.ps` (a heavy, loop-bound render) | `--lint` | 503 166M | 578 498M (+15%) |
+| 13.5M-token flat file (`1 2 add pop 3 4 mul pop` x 1.5M) | plain | 17 826M | 17 822M |
+| same | `--lint` | 19 540M | 20 349M (+4.1%) |
+| `0 1 3000000 { /x exch def } for` | plain | 3 463M | 3 462M |
+| same | `--lint` | 3 667M | 4 074M (+11%) |
+| `/f { 1 pop } def 0 1 10000000 { pop f } for` | plain | 12 241M | 12 236M |
+| same | `--lint` | 12 239M | 14 216M (+16%) |
+| `gallery/alpine_lake.ps` (a heavy, loop-bound render) | plain | 457 719M | 457 820M |
+| same | `--lint` | 473 608M | 571 536M (+21%) |
 
-A plain render pays one `Option` check per slice (the choice of loop), nothing per step.
-A lint run pays the figures above; the first two attempts (a lookup per push, then the
-timed loop shared with `--profile-ops`, which does not fuse) cost +50% and +86% on the
-loop-heavy rows and were dropped.
+The plain loop is untouched: one `bool` test per slice replaces the profile test that was
+there. A lint run pays the figures above: about two thirds of the alpine figure is the
+instrumented loop not fusing `{ } if` (what `--profile-ops` needs), the rest the per-step
+sample. Three other shapes were tried and dropped: a lookup of the element's line on every
+push (+50% on the loop rows), a third copy of the plain loop with the sample in it (lint +15%,
+but the plain loop then cost +2% in instructions on `alpine_lake` and the loop rows, as the
+compiler's inlining of the shared helpers moved), and the first version of the sample (+86%).
 
 ## Not done
 
 - Intermediate user procedures between a library body and the program's token are not
   named (above).
-- With `--profile-ops` and `--lint` together the lint keeps the token line.
 - A leak made by a procedure that `exec` builds at run time has no line of its own.
