@@ -2950,3 +2950,252 @@ fn a_function_or_mesh_pattern_used_in_another_context_paints_in_svg_as_in_the_pn
     let misses = misses.into_inner();
     assert!(misses.is_empty(), "{}", misses.join("\n"));
 }
+
+/// Every kind of mark, a `/BBox` with a `/Background`, a turned and a
+/// scaled outer cell and an uncoloured one (#1368): each reads the image
+/// made for its own canvas (so every one's image is wider than the page's
+/// 400 px the pattern was made on, unless the box cuts it narrower).
+#[test]
+fn every_mark_and_cell_reads_the_image_made_for_its_canvas() {
+    let page_pattern = |extra: &str| {
+        type1("[600 0 0 600 0 -200]").replace(
+            "/Matrix [600 0 0 600 0 -200]",
+            &format!("/Matrix [600 0 0 600 0 -200] {extra}"),
+        )
+    };
+    let tile = |pattern: &str, paint: &str, outer: &str| {
+        format!(
+            "{pattern} /grad exch def \
+             << /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 600 600] /XStep 600 /YStep 600 \
+                /PaintProc {{ pop {paint} }} >> {outer} makepattern setpattern 0 0 400 400 rectfill"
+        )
+    };
+    let mid = "[1 0 0 1 -300 -100]";
+    let cases = [
+        (
+            "bbox and background",
+            tile(
+                &page_pattern("/BBox [50 100 580 450] /Background [0.2 0.7 0.3]"),
+                "grad setpattern 0 0 600 600 rectfill",
+                mid,
+            ),
+            400,
+        ),
+        (
+            "pen-space stroke",
+            tile(
+                &page_pattern(""),
+                "grad setpattern gsave 1 3 scale 30 setlinewidth 50 20 moveto 500 150 lineto stroke grestore",
+                mid,
+            ),
+            400,
+        ),
+        (
+            "imagemask",
+            tile(
+                &page_pattern(""),
+                "grad setpattern gsave 100 100 translate 400 400 scale 1 1 true [1 0 0 1 0 0] <80> imagemask grestore",
+                mid,
+            ),
+            400,
+        ),
+        (
+            "text",
+            tile(
+                &page_pattern(""),
+                "grad setpattern /Helvetica-Bold findfont 300 scalefont setfont 20 100 moveto (Ag) show",
+                mid,
+            ),
+            400,
+        ),
+        (
+            "turned outer cell",
+            tile(
+                &page_pattern(""),
+                "grad setpattern 0 0 600 600 rectfill",
+                "[0.866 0.5 -0.5 0.866 -100 -100]",
+            ),
+            400,
+        ),
+        (
+            "scaled outer cell",
+            tile(
+                &page_pattern(""),
+                "grad setpattern 0 0 600 600 rectfill",
+                "[0.5 0 0 0.5 0 0]",
+            ),
+            200,
+        ),
+        (
+            "uncoloured outer cell",
+            format!(
+                "{} /grad exch def \
+                 << /PatternType 1 /PaintType 2 /TilingType 1 /BBox [0 0 600 600] /XStep 600 \
+                    /YStep 600 /PaintProc {{ pop grad setpattern 0 0 600 600 rectfill }} >> \
+                 {mid} makepattern /unc exch def \
+                 [/Pattern /DeviceRGB] setcolorspace 0.2 0.5 0.1 unc setcolor 0 0 400 400 rectfill",
+                page_pattern("")
+            ),
+            400,
+        ),
+    ];
+    for (name, src, made) in cases {
+        let out = render(&src);
+        assert_close(
+            &format!("{name}: SVG via resvg"),
+            &out.png,
+            &resvg_png(&out.svg),
+            3.0,
+        );
+        assert!(
+            widest_image(&out.svg) > made,
+            "{name}: the SVG image is {} wide, no wider than {made}",
+            widest_image(&out.svg)
+        );
+        assert_close(
+            &format!("{name}: PDF via hayro"),
+            &out.png,
+            &hayro_png(&out.pdf),
+            3.0,
+        );
+    }
+}
+
+/// A pattern made on one page and used on a later page of another size
+/// (`setpagedevice`) is a use on another canvas, with no change of
+/// context: its image is made for the new page (#1368).
+#[test]
+fn a_function_pattern_reused_on_a_larger_page_paints_past_its_first_canvas_in_svg() {
+    let src = format!(
+        "%!PS\n<< /PageSize [400 400] >> setpagedevice {} /grad exch def \
+         grad setpattern 0 0 400 400 rectfill showpage \
+         << /PageSize [600 600] >> setpagedevice grad setpattern 0 0 600 600 rectfill showpage\n",
+        type1("[600 0 0 600 0 0]")
+    );
+    // The CLI, which changes the page size as `setpagedevice` asks.
+    use common::CommandDeadline as _;
+    let dir = common::scratch_dir("pscat_shading_larger_page");
+    let ps = dir.join("pages.ps");
+    std::fs::write(&ps, src).expect("write ps");
+    let out = Command::new(env!("CARGO_BIN_EXE_pscat"))
+        .arg("--png")
+        .arg(dir.join("pages.png"))
+        .arg("--svg")
+        .arg(dir.join("pages.svg"))
+        .arg(&ps)
+        .stdin(std::process::Stdio::null())
+        .output_deadline()
+        .expect("spawn pscat");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let png = Pixmap::decode_png(&std::fs::read(dir.join("pages-002.png")).expect("page 2"))
+        .expect("decode");
+    assert_eq!((png.width(), png.height()), (600, 600));
+    let svg = std::fs::read_to_string(dir.join("pages-002.svg")).expect("svg page 2");
+    let opts = resvg::usvg::Options {
+        image_href_resolver: resvg::usvg::ImageHrefResolver {
+            resolve_data: Box::new(png_as_svg),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let tree = resvg::usvg::Tree::from_data(svg.as_bytes(), &opts).expect("SVG");
+    let mut pm = resvg::tiny_skia::Pixmap::new(600, 600).expect("pixmap");
+    resvg::render(
+        &tree,
+        resvg::tiny_skia::Transform::from_scale(
+            600.0 / tree.size().width(),
+            600.0 / tree.size().height(),
+        ),
+        &mut pm.as_mut(),
+    );
+    let mut theirs = Pixmap::new(600, 600).expect("pixmap");
+    theirs.data_mut().copy_from_slice(pm.data());
+    assert_close("larger page: SVG via resvg", &png, &theirs, 3.0);
+    assert!(widest_image(&svg) > 400, "{}", widest_image(&svg));
+}
+
+/// A tile whose `PaintProc` paints one point with `grad`, the page's
+/// 1000 pt Type 1 pattern: a tiny mark in a context other than the page's,
+/// so the only large thing a limit can meet is the SVG image made for the
+/// 1000 x 1000 canvas.
+const USE_FROM_A_TILE: &str = "\
+    << /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 1000 1000] /XStep 1000 /YStep 1000 \
+       /PaintProc { pop grad setpattern 0 0 1 1 rectfill } >> [1 0 0 1 -300 -300] makepattern \
+    setpattern 0 0 100 100 rectfill";
+
+fn big_function_pattern() -> String {
+    format!("{} /grad exch def", type1("[1000 0 0 1000 0 -300]"))
+}
+
+/// The SVG and the canvas a stopped mark leaves, from a run on a 1000 x 1000
+/// page that makes the pattern, then `set_limits`, then paints with it.
+fn run_foreign_use(limits: pscat::Limits) -> (Result<(), pscat::PsError>, Vec<String>, Vec<u8>) {
+    let mut it = Interp::with_page(1000, 1000).expect("page");
+    it.gfx_mut().enable_svg();
+    it.run_source(
+        format!(
+            "1 0 0 setrgbcolor 0 0 1000 1000 rectfill {}",
+            big_function_pattern()
+        )
+        .as_bytes(),
+    )
+    .expect("setup");
+    it.set_limits(limits).expect("limits");
+    let r = it.run_source(USE_FROM_A_TILE.as_bytes());
+    (
+        r,
+        it.gfx().svg_pages().expect("svg on"),
+        it.gfx().pixmap.data().to_vec(),
+    )
+}
+
+/// The image made for a use in another context is charged to the step limit
+/// and polled against the clock before anything is painted or recorded
+/// (#1368, as the mark's own layer is): a mark that is one point wide still
+/// has the whole canvas's image to make, and a limit it meets leaves the
+/// page and the SVG as they were.
+#[test]
+fn a_foreign_use_image_answers_to_the_step_and_time_limits() {
+    let (ok, svg_ok, _) = run_foreign_use(pscat::Limits::none().with_max_steps(5_000_000));
+    assert_eq!(ok, Ok(()));
+    assert_eq!(svg_ok[0].matches("<image ").count(), 1, "{}", svg_ok[0]);
+    let (_, svg_before, px_before) = {
+        // The same page and pattern, nothing painted with it.
+        let mut it = Interp::with_page(1000, 1000).expect("page");
+        it.gfx_mut().enable_svg();
+        it.run_source(
+            format!(
+                "1 0 0 setrgbcolor 0 0 1000 1000 rectfill {}",
+                big_function_pattern()
+            )
+            .as_bytes(),
+        )
+        .expect("setup");
+        (
+            Ok::<(), pscat::PsError>(()),
+            it.gfx().svg_pages().expect("svg on"),
+            it.gfx().pixmap.data().to_vec(),
+        )
+    };
+    for (what, limits, want) in [
+        (
+            "steps",
+            pscat::Limits::none().with_max_steps(20_000),
+            pscat::PsError::StepsExceeded,
+        ),
+        (
+            "time",
+            pscat::Limits::none().with_max_time(std::time::Duration::from_millis(1)),
+            pscat::PsError::TimeExceeded,
+        ),
+    ] {
+        let (r, svg, px) = run_foreign_use(limits);
+        assert_eq!(r, Err(want), "{what}");
+        assert_eq!(svg, svg_before, "{what}: the SVG is as it was");
+        assert!(px == px_before, "{what}: the page is as it was");
+    }
+}

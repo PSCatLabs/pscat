@@ -2925,17 +2925,75 @@ impl Gfx {
                     (y1 - y0).max(1) as u32,
                 );
                 let (layer, work) = shading_layer(&sp.shading, sp.background, matrix, rect, probe)?;
+                // The SVG image of a use in another context is made now,
+                // under the same limits and before anything is recorded.
+                let use_work = self.svg_use_image(&sp, place.map(|p| p.hop), probe)?;
                 Ok((
                     Some((
                         std::rc::Rc::new(layer),
                         Transform::from_translate(x0 as f32, y0 as f32),
                         tiny_skia::FilterQuality::Nearest,
                     )),
-                    work,
+                    work.saturating_add(use_work),
                 ))
             }
             Some(crate::pattern::Ink::Rgb(_)) | None => Ok((None, 0)),
         }
+    }
+
+    /// The SVG image a Type 1 or mesh shading pattern needs for a mark here
+    /// when it was made in another context or on a canvas of another size
+    /// (#1368), made once per use (`ShadingPattern::svg_uses`) so the
+    /// recorder only reads it. `makepattern` cut its image to the canvas it
+    /// ran on; the PNG paints the shading under the mark whatever that
+    /// canvas was, so the SVG's image covers this canvas where the shading
+    /// reaches it, in this context's device space. Returns its work, a step
+    /// per 1024 units, held against the step limit and its memory against
+    /// the cap before it is made, as the mark's own layer is; a limit leaves
+    /// no entry, and nothing was recorded.
+    fn svg_use_image(
+        &self,
+        sp: &crate::pattern::ShadingPattern,
+        hop: Option<Transform>,
+        probe: &crate::limits::LimitProbe,
+    ) -> Result<u64, PsError> {
+        let canvas = (self.pixmap.width(), self.pixmap.height());
+        let Some(key) = sp.svg.as_ref().and_then(|_| sp.svg_use_key(hop, canvas)) else {
+            return Ok(0);
+        };
+        if self.svg.is_none() || sp.svg_uses.borrow().contains_key(&key) {
+            return Ok(0);
+        }
+        let Some(shape) = sp.svg.as_ref().and_then(|svg| svg.shape) else {
+            return Ok(0);
+        };
+        // The shading's box in this context: the box of its corners.
+        let hop = hop.unwrap_or_default();
+        let [a, b, c, d, e, f] = [hop.sx, hop.ky, hop.kx, hop.sy, hop.tx, hop.ty].map(f64::from);
+        let map = |x: f64, y: f64| (a * x + c * y + e, b * x + d * y + f);
+        let here = corners_box([
+            map(shape[0], shape[1]),
+            map(shape[2], shape[1]),
+            map(shape[2], shape[3]),
+            map(shape[0], shape[3]),
+        ]);
+        let Some(rect) = canvas_rect(here, canvas) else {
+            sp.svg_uses.borrow_mut().insert(key, None);
+            return Ok(0);
+        };
+        let (layer, work) =
+            shading_layer(&sp.shading, None, hop.pre_concat(sp.matrix), rect, probe)?;
+        // An image embedded in an SVG, not a file pscat writes: no
+        // resolution to record (as in `image.rs`).
+        #[allow(clippy::disallowed_methods)]
+        let png = layer.encode_png().map_err(|_| PsError::Limitcheck)?;
+        // What the entry holds on, and the base64 the recorder writes.
+        probe.check_alloc(png.len().saturating_mul(2))?;
+        sp.svg_uses.borrow_mut().insert(
+            key,
+            Some(std::rc::Rc::new((png, rect.2, rect.3, rect.0, rect.1))),
+        );
+        Ok(work)
     }
 
     /// Lay out the cells of a fractional TilingType 2 pattern over the
@@ -6320,35 +6378,29 @@ impl Gfx {
                 }
                 _ => None,
             };
-            let image = match shape {
-                Some(mut b) => {
-                    if let Some(q) = bbox.map(|q| bbox_quad(matrix, q)) {
-                        let qb = corners_box(q);
-                        b = [
-                            b[0].max(qb[0]),
-                            b[1].max(qb[1]),
-                            b[2].min(qb[2]),
-                            b[3].min(qb[3]),
-                        ];
-                    }
-                    let (pw, ph) = (
-                        f64::from(self.pixmap.width()),
-                        f64::from(self.pixmap.height()),
-                    );
-                    let (x0, y0) = (b[0].floor().max(0.0), b[1].floor().max(0.0));
-                    let (x1, y1) = (b[2].ceil().min(pw), b[3].ceil().min(ph));
-                    if x1 > x0 && y1 > y0 {
-                        let rect = (x0 as i32, y0 as i32, (x1 - x0) as u32, (y1 - y0) as u32);
-                        let (layer, w) = shading_layer(&shading, None, matrix, rect, probe)?;
-                        work += w;
-                        // An image embedded in an SVG, not a file pscat
-                        // writes: no resolution to record (as in `image.rs`).
-                        #[allow(clippy::disallowed_methods)]
-                        let png = layer.encode_png().map_err(|_| PsError::Limitcheck)?;
-                        Some((png, rect.2, rect.3, rect.0, rect.1))
-                    } else {
-                        None
-                    }
+            // The box a Type 1 or mesh shading paints, cut to the BBox's.
+            let shape = shape.map(|mut b| {
+                if let Some(q) = bbox.map(|q| bbox_quad(matrix, q)) {
+                    let qb = corners_box(q);
+                    b = [
+                        b[0].max(qb[0]),
+                        b[1].max(qb[1]),
+                        b[2].min(qb[2]),
+                        b[3].min(qb[3]),
+                    ];
+                }
+                b
+            });
+            let canvas = (self.pixmap.width(), self.pixmap.height());
+            let image = match shape.and_then(|b| canvas_rect(b, canvas)) {
+                Some(rect) => {
+                    let (layer, w) = shading_layer(&shading, None, matrix, rect, probe)?;
+                    work += w;
+                    // An image embedded in an SVG, not a file pscat writes: no
+                    // resolution to record (as in `image.rs`).
+                    #[allow(clippy::disallowed_methods)]
+                    let png = layer.encode_png().map_err(|_| PsError::Limitcheck)?;
+                    Some((png, rect.2, rect.3, rect.0, rect.1))
                 }
                 None => None,
             };
@@ -6357,6 +6409,8 @@ impl Gfx {
                     .as_ref()
                     .map(|(kind, ctm, stops, extend, _)| (*kind, *ctm, stops.clone(), *extend)),
                 image,
+                canvas,
+                shape,
                 bbox: bbox.map(|q| bbox_quad(matrix, q).map(|(x, y)| (x as f32, y as f32))),
                 background,
             })
@@ -6392,6 +6446,7 @@ impl Gfx {
                 .last()
                 .map_or(Transform::identity(), |c| c.to_gs),
             svg,
+            svg_uses: std::cell::RefCell::default(),
             pdf,
             pdf_ctm,
             pdf_matrix,
@@ -7798,6 +7853,18 @@ fn extend_ramp(stops: &[(f32, f32, f32, f32)], extend: [bool; 2]) -> Vec<(f32, C
 }
 
 /// The bounding box `[llx, lly, urx, ury]` of four points.
+/// The whole-pixel rectangle `(x, y, w, h)` of the box `[x0, y0, x1, y1]`
+/// (device space) on a `canvas`, or `None` when none of it is there (or a
+/// bound is not a number).
+fn canvas_rect(b: [f64; 4], (pw, ph): (u32, u32)) -> Option<(i32, i32, u32, u32)> {
+    let (x0, y0) = (b[0].floor().max(0.0), b[1].floor().max(0.0));
+    let (x1, y1) = (
+        b[2].ceil().min(f64::from(pw)),
+        b[3].ceil().min(f64::from(ph)),
+    );
+    (x1 > x0 && y1 > y0).then(|| (x0 as i32, y0 as i32, (x1 - x0) as u32, (y1 - y0) as u32))
+}
+
 fn corners_box(c: [(f64, f64); 4]) -> [f64; 4] {
     c.iter().fold(
         [

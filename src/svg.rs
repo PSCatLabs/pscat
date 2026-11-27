@@ -106,8 +106,9 @@ pub struct SvgRecorder {
     groups: Vec<usize>,
 }
 
-/// A shading pattern's address, its placement's bits and a pen's.
-type ShadingKey = (usize, Option<[u32; 6]>, Option<[u32; 6]>);
+/// A shading pattern's address, its placement's bits, a pen's and the
+/// canvas's size (a Type 1 pattern's image is cut to it, #1368).
+type ShadingKey = (usize, Option<[u32; 6]>, Option<[u32; 6]>, (u32, u32));
 
 pub(crate) type Chain = Option<Rc<ClipNode>>;
 
@@ -268,6 +269,7 @@ impl SvgRecorder {
                     l.sx, l.ky, l.kx, l.sy, 0.0, 0.0,
                 ))
             }),
+            (self.width, self.height),
         );
         if let Some((_, paint)) = self.shading_ids.get(&key) {
             return paint.clone();
@@ -277,6 +279,14 @@ impl SvgRecorder {
         let to_here = pen_inv.unwrap_or_default().pre_concat(hop_t);
         let as_row = |t: tiny_skia::Transform| [t.sx, t.ky, t.kx, t.sy, t.tx, t.ty];
         let prefix = self.prefix.clone();
+        // A use in another context, or on a canvas of another size, has an
+        // image of its own (#1368), made by the mark before it was recorded
+        // (`Gfx::svg_use_image`): in this recorder's device space, so the
+        // hop does not apply to it. `Some(None)`: the shading does not reach
+        // this canvas. `None`: the made image serves.
+        let foreign = sp
+            .svg_use_key(hop, (self.width, self.height))
+            .and_then(|key| sp.svg_uses.borrow().get(&key).cloned());
         let paint = match (&form.gradient, &form.image) {
             // A cone's smaller root is a second gradient (#1370), which
             // takes the canvas `<pattern>` below, not one `url(#…)`.
@@ -290,7 +300,9 @@ impl SvgRecorder {
                     None => "none".to_string(),
                 }
             }
-            (None, None) if form.background.is_none() => "none".to_string(),
+            (None, None) if form.background.is_none() && !matches!(foreign, Some(Some(_))) => {
+                "none".to_string()
+            }
             _ => {
                 // The canvas, in the shading's context's coordinates.
                 let (w, h) = (self.width as f32, self.height as f32);
@@ -337,14 +349,20 @@ impl SvgRecorder {
                         );
                     }
                 }
-                if let Some((png, iw, ih, x, y)) = &form.image {
-                    let _ = write!(
-                        content,
+                let made = match &foreign {
+                    Some(_) => None,
+                    None => form.image.as_ref(),
+                };
+                let image = |png: &[u8], iw: u32, ih: u32, x: i32, y: i32| {
+                    format!(
                         "<image width=\"{iw}\" height=\"{ih}\" preserveAspectRatio=\"none\" \
                          transform=\"translate({x} {y})\" \
                          xlink:href=\"data:image/png;base64,{}\"/>",
                         base64(png)
-                    );
+                    )
+                };
+                if let Some((png, iw, ih, x, y)) = made {
+                    content.push_str(&image(png, *iw, *ih, *x, *y));
                 }
                 if let Some(q) = &form.bbox {
                     let _ = write!(
@@ -357,6 +375,27 @@ impl SvgRecorder {
                 }
                 if hop.is_some() {
                     content = format!("<g transform=\"{}\">{content}</g>", svg_matrix(hop_t));
+                }
+                if let Some(Some(img)) = &foreign {
+                    // Outside the hop group, cut to the `/BBox`'s corners as
+                    // this recorder sees them.
+                    let (png, iw, ih, x, y) = &**img;
+                    let tag = image(png, *iw, *ih, *x, *y);
+                    match &form.bbox {
+                        Some(q) => {
+                            let mut pts = q.map(|(x, y)| tiny_skia::Point::from_xy(x, y));
+                            hop_t.map_points(&mut pts);
+                            let _ = write!(
+                                self.defs,
+                                "<clipPath id=\"{prefix}sh{n}\" clipPathUnits=\"userSpaceOnUse\">\
+                                 <path d=\"{}\"/></clipPath>",
+                                poly(&pts.map(|p| (p.x, p.y)))
+                            );
+                            let _ =
+                                write!(content, "<g clip-path=\"url(#{prefix}sh{n})\">{tag}</g>");
+                        }
+                        None => content.push_str(&tag),
+                    }
                 }
                 let transform = match pen_inv {
                     Some(inv) => format!(" patternTransform=\"{}\"", svg_matrix(inv)),
