@@ -39,7 +39,14 @@ a main-program line stays bare; `tests/cli.rs`
   below the show's own, which the interpreter charges per glyph, so it is not
   separately charged: `the_check_changes_no_output_and_no_step_count` shows the
   step count is the same on and off.
-- *Unbounded list.* 5 fonts x 6 characters x 128-byte names, plus a count.
+- *Unbounded list.* 5 fonts x 6 characters x 128-byte names, plus a count of
+  further fonts that is a set of names capped at `MAX_UTF8_TEXT_MORE_FONTS` (1024).
+  This also fixes a #1412 bug the public field would have exposed: the count of
+  "more byte-mode fonts" went up on every show in a sixth font, so a font that
+  showed text three times read as three (`a_font_past_the_limit_is_counted_once_...`;
+  the base binary printed "3 more" for two further fonts, head prints "2 more").
+  The one intended change to lint text, apart from that count: a `FontName` over
+  128 bytes is cut with `...`.
 - *Behaviour change when off.* None: `utf8_text_findings()` is empty, no
   allocation, and `the_check_changes_no_output_and_no_step_count` compares pixels,
   stacks and steps on and off.

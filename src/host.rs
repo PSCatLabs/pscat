@@ -1288,6 +1288,10 @@ pub const MAX_UTF8_TEXT_FONTS: usize = crate::lint::UTF8_FONTS_SHOWN;
 /// Distinct characters a [`Utf8TextFinding`] names.
 pub const MAX_UTF8_TEXT_CHARS: usize = crate::lint::UTF8_CHARS_SHOWN;
 
+/// The most fonts past [`MAX_UTF8_TEXT_FONTS`] that [`Utf8TextReport::more_fonts`]
+/// counts, so it is a floor ("at least") for a program that uses more.
+pub const MAX_UTF8_TEXT_MORE_FONTS: usize = crate::lint::UTF8_MORE_FONTS_COUNTED;
+
 /// The longest [`Utf8TextFinding::font`], in bytes before a closing `...`
 /// that marks a longer name as cut.
 pub const MAX_UTF8_TEXT_NAME_BYTES: usize = crate::font::UTF8_FONT_NAME_MAX;
@@ -1333,8 +1337,8 @@ pub struct Utf8TextFinding {
 pub struct Utf8TextReport {
     /// One finding per font, in the order the fonts were first used.
     pub fonts: Vec<Utf8TextFinding>,
-    /// Fonts past [`MAX_UTF8_TEXT_FONTS`] that were shown UTF-8 text, not
-    /// named in `fonts`.
+    /// Distinct fonts past [`MAX_UTF8_TEXT_FONTS`] that were shown UTF-8 text,
+    /// not named in `fonts` (counted up to [`MAX_UTF8_TEXT_MORE_FONTS`]).
     pub more_fonts: usize,
 }
 
@@ -1362,6 +1366,9 @@ impl Interp {
     /// (`run_str`, `run_source`, `begin_source`) forgets them, so read them after
     /// each run, including a run that returned an error (the show before the
     /// error is still reported). Turning the check off forgets them too.
+    ///
+    /// Like the rest of the crate API this is Experimental
+    /// (`docs/STABILITY.md`): it can change in any release.
     ///
     /// ```
     /// let mut interp = pscat::Interp::with_page(100, 100).expect("valid page size");

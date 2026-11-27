@@ -160,6 +160,20 @@ fn the_report_is_bounded_in_fonts_and_characters() {
     assert_eq!(report.more_fonts, fonts.len() - MAX_UTF8_TEXT_FONTS);
     assert_eq!(report.fonts[0].font, "Helvetica");
 
+    // A font past the fifth that shows text again is one font, not two more.
+    let mut again = src.clone();
+    again.push_str(&format!(
+        "/{} findfont 12 scalefont setfont 5 40 moveto (\u{3c0}) show\n",
+        fonts[5]
+    ));
+    let mut it = interp();
+    it.set_utf8_text_check(true);
+    it.run_str(&again).expect("runs");
+    assert_eq!(
+        it.utf8_text_findings().more_fonts,
+        fonts.len() - MAX_UTF8_TEXT_FONTS
+    );
+
     let text = "\u{3b1}\u{3b2}\u{3b3}\u{3b4}\u{3b5}\u{3b6}\u{3b7}\u{3b8}\u{3b1}";
     let mut it = interp();
     it.set_utf8_text_check(true);

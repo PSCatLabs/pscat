@@ -626,8 +626,10 @@ pub(crate) fn spells_name(els: &[Object], name_id: u32) -> bool {
 #[derive(Default)]
 pub(crate) struct Utf8TextTrace {
     fonts: Vec<Utf8Font>,
-    /// Fonts past [`UTF8_FONTS_SHOWN`] that took UTF-8 text.
-    more_fonts: usize,
+    /// Distinct fonts past [`UTF8_FONTS_SHOWN`] that took UTF-8 text, up to
+    /// [`UTF8_MORE_FONTS_COUNTED`]: a set, so a font shown again is not
+    /// counted again (#1446).
+    more_fonts: std::collections::HashSet<Box<str>>,
 }
 
 struct Utf8Font {
@@ -659,11 +661,15 @@ pub(crate) struct Utf8Site {
 pub(crate) const UTF8_FONTS_SHOWN: usize = 5;
 /// Distinct characters named per font.
 pub(crate) const UTF8_CHARS_SHOWN: usize = 6;
+/// Fonts past [`UTF8_FONTS_SHOWN`] that are counted (by name, so each costs at
+/// most a name's bytes): a program that makes more fonts than this reads
+/// "at least".
+pub(crate) const UTF8_MORE_FONTS_COUNTED: usize = 1024;
 
 impl Utf8TextTrace {
     pub(crate) fn clear(&mut self) {
         self.fonts.clear();
-        self.more_fonts = 0;
+        self.more_fonts.clear();
     }
 
     /// What the program showed, for a host that reads it as data
@@ -684,7 +690,7 @@ impl Utf8TextTrace {
                         .and(f.site.run_file.clone().or_else(|| f.site.main_file.clone())),
                 })
                 .collect(),
-            more_fonts: self.more_fonts,
+            more_fonts: self.more_fonts.len(),
         }
     }
 
@@ -704,7 +710,11 @@ impl Utf8TextTrace {
                 self.fonts.len() - 1
             }
             None => {
-                self.more_fonts += 1;
+                if self.more_fonts.len() < UTF8_MORE_FONTS_COUNTED
+                    && !self.more_fonts.contains(font)
+                {
+                    self.more_fonts.insert(font.into());
+                }
                 return;
             }
         };
@@ -759,12 +769,12 @@ fn check_utf8_in_byte_font(interp: &Interp, findings: &mut Vec<LintFinding>) {
             ),
         });
     }
-    if trace.more_fonts > 0 {
+    if !trace.more_fonts.is_empty() {
         findings.push(LintFinding {
             check: "utf8-in-byte-font",
             message: format!(
                 "UTF-8 text was also shown in {} more byte-mode font(s) ({UTF8_FONTS_SHOWN} shown)",
-                trace.more_fonts
+                trace.more_fonts.len()
             ),
         });
     }
@@ -2087,6 +2097,31 @@ mod tests {
         );
         let _ = it.run_str(&format!("{BYTE_FONT}(ascii) show"));
         assert!(!checks(&it, false).contains(&"utf8-in-byte-font"));
+    }
+
+    #[test]
+    fn a_font_past_the_limit_is_counted_once_however_often_it_shows_text() {
+        let fonts = [
+            "Helvetica",
+            "Times-Roman",
+            "Courier",
+            "Palatino-Roman",
+            "Bookman-Light",
+            "AvantGarde-Book",
+            "NewCenturySchlbk-Roman",
+            "AvantGarde-Book",
+            "AvantGarde-Book",
+        ];
+        let src: String = fonts
+            .iter()
+            .map(|f| format!("/{f} findfont 12 scalefont setfont 5 40 moveto (\u{3c0}) show "))
+            .collect();
+        let m = utf8_messages(&src);
+        assert_eq!(m.len(), UTF8_FONTS_SHOWN + 1, "{m:?}");
+        assert!(
+            m.last().unwrap().contains("2 more byte-mode font(s)"),
+            "{m:?}"
+        );
     }
 
     #[test]
