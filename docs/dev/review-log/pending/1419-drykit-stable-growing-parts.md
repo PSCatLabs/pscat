@@ -1,4 +1,4 @@
-## drykit: a growing part keeps its drawn pixels; a /From cut starts flat (PR #TBD, issue #1419, 2026-11-26)
+## drykit: a growing part keeps its drawn pixels; a /From cut starts flat (PR #1441, issue #1419, 2026-11-26)
 
 - **What changed / what to look at:** only strokes drawn with `/From`/`/To` change (dkstroke, dhstroke, dycrayon, dcchalk tip strokes). Default renders are byte-identical. Look at the 1500-piece rows: they are the part of the check that is not met.
 - **Perceptual check:** "Render frames of a growing chalk stroke at 3 to 4% steps and step through them: no frame changes the edge of the already-drawn part, and a stroke built from 1500 tiny `/From prev /To now` pieces is as dark as the whole stroke."
