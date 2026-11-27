@@ -804,6 +804,20 @@ fn lint_with_bands_reports_a_shadowed_operator_once_and_honours_the_allow() {
     assert!(err.contains("lint: clean"), "{err}");
 }
 
+/// UTF-8 text in a byte-mode font is reported once (band 0), and the allow
+/// comment silences it, as in a plain run (#1412).
+#[test]
+fn lint_with_bands_reports_utf8_in_a_byte_font_once_and_honours_the_allow() {
+    let src = format!("/Helvetica findfont 12 scalefont setfont 5 5 moveto (aπb) show {PAINTS}");
+    let (_ok, err) = bands_stderr("bands-lint-utf8", &["--lint"], &src);
+    assert_eq!(findings(&err, "utf8-in-byte-font"), 1, "{err}");
+    assert!(err.contains("π U+03C0"), "{err}");
+    let allowed = format!("%lint: allow utf8-in-byte-font\n{src}");
+    let (_ok, err) = bands_stderr("bands-lint-utf8-allowed", &["--lint"], &allowed);
+    assert_eq!(findings(&err, "utf8-in-byte-font"), 0, "{err}");
+    assert!(err.contains("lint: clean"), "{err}");
+}
+
 /// A band-aware program paints nothing in the top band, so band 0's own
 /// canvas is empty; the page is not blank, and lint must not say so.
 #[test]

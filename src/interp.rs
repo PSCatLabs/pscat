@@ -525,6 +525,10 @@ pub struct Interp {
     /// [`Interp::trace_operator_shadows`] turned tracing on (issue #1109);
     /// `None` otherwise, which costs `def` one branch.
     shadow_trace: Option<Box<crate::lint::ShadowTrace>>,
+    /// The strings of UTF-8 text a show gave a byte-mode font, when
+    /// [`Interp::trace_utf8_text`] turned tracing on (issue #1412); `None`
+    /// otherwise, which costs `begin_show` one branch.
+    utf8_text_trace: Option<Box<crate::lint::Utf8TextTrace>>,
     /// Where the procedure bodies scanned from the main program and `run`
     /// files were written (#1405): what a backtrace frame's line and file
     /// are read from, and the lint's def sites. Behind a pointer to keep
@@ -896,6 +900,7 @@ impl Interp {
             last_line: None,
             last_file: None,
             shadow_trace: None,
+            utf8_text_trace: None,
             source_lines: Box::default(),
             main_file_name: None,
             stack_trace: None,
@@ -1399,6 +1404,10 @@ impl Interp {
         self.refused_system_stores.clear();
         if let Some(trace) = self.shadow_trace.as_mut() {
             trace.forget_system();
+        }
+        // The text the last program showed is that program's (#1412).
+        if let Some(trace) = self.utf8_text_trace.as_mut() {
+            trace.clear();
         }
         self.estack.push(Frame::Scanner(
             Lexer::main_program(src.to_vec()).with_limits(self.decode_budget.clone()),
@@ -3447,6 +3456,9 @@ impl Interp {
         // For a Type 1 glyph's decryption (#1188), checked with no steps:
         // the deadline and the heap cap do not move while the show runs.
         ctx.set_limit_probe(self.limit_probe());
+        if self.utf8_text_trace.is_some() {
+            self.note_utf8_text(&ctx);
+        }
         self.push_frame(Frame::Show(Box::new(ctx)))
     }
 
@@ -3728,6 +3740,43 @@ impl Interp {
     #[doc(hidden)]
     pub fn trace_operator_shadows(&mut self) {
         self.shadow_trace.get_or_insert_with(Default::default);
+    }
+
+    /// Have every show note a string of UTF-8 text it gives a byte-mode
+    /// font, for the `[utf8-in-byte-font]` lint (issue #1412). Off by
+    /// default (a show then costs one extra branch); `--lint` turns it on.
+    #[doc(hidden)]
+    pub fn trace_utf8_text(&mut self) {
+        self.utf8_text_trace.get_or_insert_with(Default::default);
+    }
+
+    pub(crate) fn utf8_text_trace(&self) -> Option<&crate::lint::Utf8TextTrace> {
+        self.utf8_text_trace.as_deref()
+    }
+
+    /// Note the string `ctx` is about to show when the current font reads
+    /// bytes and the string is well-formed UTF-8 (see
+    /// [`crate::font::utf8_in_byte_font`]), with the line the scanner had
+    /// reached, which is the line that ran the show when a procedure did.
+    #[inline(never)]
+    fn note_utf8_text(&mut self, ctx: &ShowCtx) {
+        let Some(fs) = self.gfx.state().font.as_ref() else {
+            return;
+        };
+        let Some((font, text)) = crate::font::utf8_in_byte_font(fs, ctx.text()) else {
+            return;
+        };
+        let at = self.last_line.map(|line| {
+            let file = self
+                .last_file
+                .as_deref()
+                .map(|f| format!(" ({})", report_name(f)))
+                .unwrap_or_default();
+            format!("when the program reached line {line}{file}")
+        });
+        if let Some(trace) = self.utf8_text_trace.as_mut() {
+            trace.note(&font, text, at);
+        }
     }
 
     /// Have every scanned source token note the operand-stack depth, for

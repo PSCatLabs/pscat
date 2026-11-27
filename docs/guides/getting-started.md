@@ -47,7 +47,10 @@ cargo run -- --lint --png out.png file.ps # self-check: blank page? unbalanced
                                           # an operator name (/sub) redefined
                                           # as a plain value? (silence it with
                                           # a %lint: allow shadowed-operator
-                                          # comment line)
+                                          # comment line) UTF-8 text (π, ≠)
+                                          # shown in a font that reads bytes?
+                                          # (the fix is /PSCatUnicode true;
+                                          # %lint: allow utf8-in-byte-font)
 cargo run -- --lint-strict file.ps        # ...and exit non-zero on any finding
                                           # (a run that errored is never "clean":
                                           # lint prints [run-error] and exits 1)

@@ -149,7 +149,7 @@ still writes the partial canvas after an error: useful to see how far a
 program got.
 
 **`--lint`** catches mistakes that don't *error*: a blank page, an
-unbalanced `gsave`/`grestore`, stuff left on the operand/dict stack, a built-in operator name such as `/sub` redefined as a plain value (`[shadowed-operator]`; silence a deliberate one with a `%lint: allow shadowed-operator` comment line).
+unbalanced `gsave`/`grestore`, stuff left on the operand/dict stack, a built-in operator name such as `/sub` redefined as a plain value (`[shadowed-operator]`; silence a deliberate one with a `%lint: allow shadowed-operator` comment line), and UTF-8 text such as `π` or `≠` in a string shown in a font that reads bytes (`[utf8-in-byte-font]`; the fix is a font copy with `/PSCatUnicode true`, see the fonts guide; `%lint: allow utf8-in-byte-font` silences it).
 Findings print to stderr as `pscat: lint: [check] message` (or
 `pscat: lint: clean`); the exit code is unchanged (`--lint-strict` makes
 findings fail). A run that errored prints `pscat: lint: [run-error]`.

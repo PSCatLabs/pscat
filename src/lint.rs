@@ -72,6 +72,7 @@ pub fn check_with_pages(
     check_gsave_balance(interp, &mut findings);
     check_stack_leaks(interp, render_checks, &mut findings);
     check_shadowed_operators(interp, &mut findings);
+    check_utf8_in_byte_font(interp, &mut findings);
     findings
 }
 
@@ -89,6 +90,7 @@ pub fn check_band(interp: &Interp, declared_pages: &DeclaredPages) -> Vec<LintFi
     check_gsave_balance(interp, &mut findings);
     check_stack_leaks(interp, true, &mut findings);
     check_shadowed_operators(interp, &mut findings);
+    check_utf8_in_byte_font(interp, &mut findings);
     findings
 }
 
@@ -325,12 +327,14 @@ fn string_preview(s: &PsString) -> String {
 }
 
 /// The checks a program silences for itself with a `%lint: allow NAME`
-/// comment line (issue #1052). Only `shadowed-operator` can be silenced:
-/// the other checks are what `--lint-strict` drivers depend on, and a
-/// program has no business turning them off.
+/// comment line (issue #1052). Only the two heuristics that can be wrong
+/// about a deliberate choice can be silenced: `shadowed-operator` and
+/// `utf8-in-byte-font` (#1412). The other checks are what `--lint-strict`
+/// drivers depend on, and a program has no business turning them off.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct LintAllows {
     shadowed_operator: bool,
+    utf8_in_byte_font: bool,
 }
 
 /// Read the `%lint: allow ...` comment lines of a program's source. A line
@@ -352,8 +356,10 @@ pub fn scan_lint_allows(source: &[u8]) -> LintAllows {
             continue;
         }
         for name in names.split(|c: char| c.is_whitespace() || c == ',') {
-            if name == "shadowed-operator" {
-                allows.shadowed_operator = true;
+            match name {
+                "shadowed-operator" => allows.shadowed_operator = true,
+                "utf8-in-byte-font" => allows.utf8_in_byte_font = true,
+                _ => {}
             }
         }
     }
@@ -365,6 +371,9 @@ impl LintAllows {
     pub fn filter(&self, mut findings: Vec<LintFinding>) -> Vec<LintFinding> {
         if self.shadowed_operator {
             findings.retain(|f| f.check != "shadowed-operator");
+        }
+        if self.utf8_in_byte_font {
+            findings.retain(|f| f.check != "utf8-in-byte-font");
         }
         findings
     }
@@ -606,6 +615,117 @@ pub(crate) fn writes_name(body: &crate::object::PsArray, end: usize, name_id: u3
 pub(crate) fn spells_name(els: &[Object], name_id: u32) -> bool {
     els.iter()
         .any(|o| !o.executable && matches!(&o.value, Value::Name(n) if n.id() == name_id))
+}
+
+/// UTF-8 text a show gave a font that reads bytes (issue #1412), noted as
+/// the program ran when [`Interp::trace_utf8_text`] turned tracing on, so
+/// `[utf8-in-byte-font]` can name the font, the characters and the line.
+/// Bounded: [`UTF8_FONTS_SHOWN`] fonts, [`UTF8_CHARS_SHOWN`] distinct
+/// characters each, so a program that shows a long UTF-8 text in a loop
+/// costs a set lookup per show and no growth.
+#[derive(Default)]
+pub(crate) struct Utf8TextTrace {
+    fonts: Vec<Utf8Font>,
+    /// Fonts past [`UTF8_FONTS_SHOWN`] that took UTF-8 text.
+    more_fonts: usize,
+}
+
+struct Utf8Font {
+    name: String,
+    chars: Vec<char>,
+    /// More distinct characters than are kept.
+    more_chars: bool,
+    /// `when the program reached line N`, for the first show in this font.
+    at: Option<String>,
+}
+
+/// Fonts named by `[utf8-in-byte-font]`; the rest are counted in a closing
+/// finding.
+const UTF8_FONTS_SHOWN: usize = 5;
+/// Distinct characters named per font.
+const UTF8_CHARS_SHOWN: usize = 6;
+
+impl Utf8TextTrace {
+    pub(crate) fn clear(&mut self) {
+        self.fonts.clear();
+        self.more_fonts = 0;
+    }
+
+    /// Record `text` (well-formed UTF-8 with a non-ASCII character) shown in
+    /// the byte-mode font `font`.
+    pub(crate) fn note(&mut self, font: &str, text: &str, at: Option<String>) {
+        let idx = match self.fonts.iter().position(|f| f.name == font) {
+            Some(i) => i,
+            None if self.fonts.len() < UTF8_FONTS_SHOWN => {
+                self.fonts.push(Utf8Font {
+                    name: font.to_string(),
+                    chars: Vec::new(),
+                    more_chars: false,
+                    at,
+                });
+                self.fonts.len() - 1
+            }
+            None => {
+                self.more_fonts += 1;
+                return;
+            }
+        };
+        let f = &mut self.fonts[idx];
+        for c in text.chars().filter(|c| !c.is_ascii()) {
+            if f.chars.contains(&c) {
+                continue;
+            }
+            if f.chars.len() >= UTF8_CHARS_SHOWN {
+                f.more_chars = true;
+                break;
+            }
+            f.chars.push(c);
+        }
+    }
+}
+
+/// A string of UTF-8 text shown in a font that reads one character per byte
+/// (issue #1412): `(aπb) show` in Helvetica draws `aˇ b`, which is correct
+/// PostScript and so says nothing at run time. The fix is a font that opts
+/// into UTF-8 with `/PSCatUnicode true` (see [`crate::font::utf8_in_byte_font`]
+/// for what counts, and what is deliberately left alone: the false positive
+/// is the worse mistake). Silenced by `%lint: allow utf8-in-byte-font`.
+fn check_utf8_in_byte_font(interp: &Interp, findings: &mut Vec<LintFinding>) {
+    let Some(trace) = interp.utf8_text_trace() else {
+        return;
+    };
+    for f in &trace.fonts {
+        let chars = f
+            .chars
+            .iter()
+            .map(|c| {
+                if c.is_control() {
+                    format!("U+{:04X}", u32::from(*c))
+                } else {
+                    format!("{c} U+{:04X}", u32::from(*c))
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        let more = if f.more_chars { ", ..." } else { "" };
+        let at = f.at.as_ref().map(|a| format!(" {a}")).unwrap_or_default();
+        findings.push(LintFinding {
+            check: "utf8-in-byte-font",
+            message: format!(
+                "a string holding UTF-8 text ({chars}{more}) was shown in the font /{}{at}; that font reads each byte as one character, so the text draws as stray accents or blanks; put /PSCatUnicode true in a copy of the font to read UTF-8 (docs/guides/fonts.md, \"Unicode text and emoji\"), or silence this with a `%lint: allow utf8-in-byte-font` comment line",
+                f.name
+            ),
+        });
+    }
+    if trace.more_fonts > 0 {
+        findings.push(LintFinding {
+            check: "utf8-in-byte-font",
+            message: format!(
+                "UTF-8 text was also shown in {} more byte-mode font(s) ({UTF8_FONTS_SHOWN} shown)",
+                trace.more_fonts
+            ),
+        });
+    }
 }
 
 /// One shadow to report.
@@ -1698,5 +1818,219 @@ mod tests {
         ] {
             assert_eq!(names(src), ["shadowed-operator", "blank-page"], "{src:?}");
         }
+    }
+
+    // --- utf8-in-byte-font (#1412) ---------------------------------------
+
+    fn utf8_messages(src: &str) -> Vec<String> {
+        let mut it = Interp::with_page(80, 80).expect("page");
+        it.trace_utf8_text();
+        let _ = it.run_str(src);
+        check(&it, false)
+            .into_iter()
+            .filter(|f| f.check == "utf8-in-byte-font")
+            .map(|f| f.message)
+            .collect()
+    }
+
+    const BYTE_FONT: &str = "/Helvetica findfont 12 scalefont setfont 5 40 moveto ";
+    const UNICODE_COPY: &str = "/Helvetica findfont dup length dict copy dup /PSCatUnicode true put \
+         /Helvetica-U exch definefont 12 scalefont setfont 5 40 moveto ";
+
+    #[test]
+    fn utf8_text_in_a_byte_font_is_named_with_the_fix() {
+        let m = utf8_messages(&format!("{BYTE_FONT}\n(a\u{3c0}b) show"));
+        assert_eq!(m.len(), 1, "{m:?}");
+        for want in [
+            "\u{3c0} U+03C0",
+            "the font /Helvetica",
+            "when the program reached line 2",
+            "/PSCatUnicode true",
+        ] {
+            assert!(m[0].contains(want), "{want}: {}", m[0]);
+        }
+    }
+
+    #[test]
+    fn every_show_operator_is_checked() {
+        for show in [
+            "(\u{2260}) show",
+            "(\u{2260}) stringwidth pop pop",
+            "(\u{2260}) false charpath",
+            "{ pop pop } (\u{2260}) kshow",
+            "1 1 (\u{2260}) ashow",
+            "1 0 32 (\u{2260}) widthshow",
+            "1 1 32 1 1 (\u{2260}) awidthshow",
+            "(\u{2260}) [1 1 1] xshow",
+            "{ pop pop pop } (\u{2260}) cshow",
+        ] {
+            let m = utf8_messages(&format!("{BYTE_FONT}{show}"));
+            assert_eq!(m.len(), 1, "{show}: {m:?}");
+        }
+    }
+
+    #[test]
+    fn a_unicode_mode_font_is_not_reported() {
+        let text = "(a\u{3c0} \u{1f44d}) show";
+        // The key in a definefont copy, on a scalefont result, through
+        // selectfont-free scale, and inside a procedure.
+        for setup in [
+            UNICODE_COPY,
+            "/Helvetica findfont 12 scalefont dup /PSCatUnicode true put setfont 5 40 moveto ",
+        ] {
+            assert!(
+                utf8_messages(&format!("{setup}{text}")).is_empty(),
+                "{setup}"
+            );
+        }
+        let in_proc = format!("/say {{ {text} }} def {UNICODE_COPY} say");
+        assert!(utf8_messages(&in_proc).is_empty());
+        // An explicit false is bytes on purpose.
+        let off = "/Helvetica findfont dup length dict copy dup /PSCatUnicode false put \
+                   /H-B exch definefont 12 scalefont setfont 5 40 moveto ";
+        assert!(utf8_messages(&format!("{off}{text}")).is_empty());
+        // The catalog's Unicode-mode faces, when this build has one.
+        let it = run("/NanumBrushScript-Regular findfont pop");
+        if it.operand_stack().is_empty() {
+            let src = format!(
+                "/NanumBrushScript-Regular findfont 12 scalefont setfont 5 40 moveto {text}"
+            );
+            assert!(utf8_messages(&src).is_empty());
+        }
+    }
+
+    #[test]
+    fn a_copy_without_the_key_is_still_a_byte_font() {
+        let copy = "/Helvetica findfont dup length dict copy /Helvetica-C exch definefont \
+                    12 scalefont setfont 5 40 moveto ";
+        let m = utf8_messages(&format!("{copy}(\u{3c0}) show"));
+        assert_eq!(m.len(), 1, "{m:?}");
+        // The same copy re-encoded, which is the idiom for Latin-1 text.
+        let latin1 = "/Helvetica findfont dup length dict copy dup /Encoding ISOLatin1Encoding put \
+                      /Helvetica-L exch definefont 12 scalefont setfont 5 40 moveto ";
+        assert_eq!(utf8_messages(&format!("{latin1}(\u{3c0}) show")).len(), 1);
+    }
+
+    #[test]
+    fn a_string_in_procedures_and_loops_is_reported_once_per_font() {
+        let src = format!(
+            "{BYTE_FONT} /say {{ (\u{e9}\u{3c0}) show }} def 200 {{ say }} repeat \
+             /Times-Roman findfont 12 scalefont setfont (\u{e9}) show"
+        );
+        let m = utf8_messages(&src);
+        assert_eq!(m.len(), 2, "{m:?}");
+        assert!(m[0].contains("\u{e9} U+00E9, \u{3c0} U+03C0"), "{}", m[0]);
+        assert!(m[1].contains("/Times-Roman"), "{}", m[1]);
+    }
+
+    #[test]
+    fn latin1_binary_and_ascii_strings_are_not_reported() {
+        for text in [
+            r"(caf\351) show",          // the Latin-1 idiom the guides teach
+            r"(Fr\350re Jacques) show", // an accent between ASCII
+            r"(\377\376\200\201) show", // binary
+            r"(a\317) show",            // a cut-off sequence
+            r"(\317\200\351) show",     // UTF-8 then a Latin-1 byte: a deliberate miss
+            "(plain ASCII) show",
+            "() show",
+            // Symbol's high bytes are symbol codes that can look like UTF-8.
+            "/Symbol findfont 12 scalefont setfont 5 40 moveto (\u{3c0}) show",
+        ] {
+            let src = if text.contains("findfont") {
+                text.to_string()
+            } else {
+                format!("{BYTE_FONT}{text}")
+            };
+            assert!(utf8_messages(&src).is_empty(), "{text}");
+        }
+        // ZapfDingbats too, and a Type 3 font (a user dict, not a face).
+        assert!(
+            utf8_messages(
+                "/ZapfDingbats findfont 12 scalefont setfont 5 40 moveto (\u{2713}) show"
+            )
+            .is_empty()
+        );
+        let t3 = "/T3 8 dict def T3 begin /FontType 3 def /FontMatrix [0.001 0 0 0.001 0 0] def \
+                  /FontBBox [0 0 1000 1000] def /Encoding 256 array def \
+                  /BuildChar { pop pop 1000 0 setcharwidth } def end \
+                  /T3 T3 definefont 12 scalefont setfont 5 40 moveto (\u{3c0}) show";
+        assert!(utf8_messages(t3).is_empty());
+    }
+
+    #[test]
+    fn the_report_is_bounded_and_a_new_program_starts_clean() {
+        let many: String = (0x3b1u32..0x3b1 + 30).filter_map(char::from_u32).collect();
+        let m = utf8_messages(&format!("{BYTE_FONT}({many}) show"));
+        assert_eq!(m.len(), 1);
+        assert!(m[0].contains(", ...)"), "{}", m[0]);
+        assert_eq!(m[0].matches("U+").count(), UTF8_CHARS_SHOWN, "{}", m[0]);
+        // More fonts than are named are counted.
+        let fonts = [
+            "Helvetica",
+            "Times-Roman",
+            "Courier",
+            "Palatino-Roman",
+            "Bookman-Light",
+            "AvantGarde-Book",
+            "NewCenturySchlbk-Roman",
+        ];
+        let src: String = fonts
+            .iter()
+            .map(|f| format!("/{f} findfont 12 scalefont setfont 5 40 moveto (\u{3c0}) show "))
+            .collect();
+        let m = utf8_messages(&src);
+        assert_eq!(m.len(), UTF8_FONTS_SHOWN + 1, "{m:?}");
+        assert!(m.last().unwrap().contains("2 more byte-mode font(s)"));
+        // The next program on the same interpreter is not blamed for it.
+        let mut it = Interp::with_page(80, 80).expect("page");
+        it.trace_utf8_text();
+        let _ = it.run_str(&format!("{BYTE_FONT}(\u{3c0}) show"));
+        assert_eq!(
+            check(&it, false)
+                .iter()
+                .filter(|f| f.check == "utf8-in-byte-font")
+                .count(),
+            1
+        );
+        let _ = it.run_str(&format!("{BYTE_FONT}(ascii) show"));
+        assert!(!checks(&it, false).contains(&"utf8-in-byte-font"));
+    }
+
+    #[test]
+    fn an_untraced_run_reports_nothing() {
+        let it = run(&format!("{BYTE_FONT}(\u{3c0}) show"));
+        assert!(!checks(&it, false).contains(&"utf8-in-byte-font"));
+    }
+
+    #[test]
+    fn the_allow_comment_silences_utf8_in_a_byte_font_only() {
+        let findings = || {
+            ["utf8-in-byte-font", "shadowed-operator"]
+                .into_iter()
+                .map(|check| LintFinding {
+                    check,
+                    message: String::new(),
+                })
+                .collect::<Vec<_>>()
+        };
+        let names = |src: &[u8]| -> Vec<&'static str> {
+            scan_lint_allows(src)
+                .filter(findings())
+                .iter()
+                .map(|f| f.check)
+                .collect()
+        };
+        assert_eq!(
+            names(b"showpage\n"),
+            ["utf8-in-byte-font", "shadowed-operator"]
+        );
+        assert_eq!(
+            names(b"%lint: allow utf8-in-byte-font\n"),
+            ["shadowed-operator"]
+        );
+        assert_eq!(
+            names(b"%lint: allow shadowed-operator utf8-in-byte-font\n"),
+            Vec::<&str>::new()
+        );
     }
 }

@@ -60,6 +60,39 @@ fn outline_unicode(fs: &FontState) -> bool {
             .is_some_and(|o| matches!(o.value, Value::Boolean(true)))
 }
 
+/// Whether showing `text` in `fs` is the mistake `[utf8-in-byte-font]`
+/// reports (issue #1412): UTF-8 text given to a font that reads one
+/// character per byte, which draws stray accents and blanks. Returns the
+/// font's name and the text. A heuristic that errs toward silence:
+/// - the WHOLE string must be well-formed UTF-8 with a non-ASCII scalar, so
+///   `(caf\351)`, other Latin-1 and binary strings are never reported;
+/// - an outline face only (`fid >= 0`): a user Type 3 or Type 1 dict is
+///   skipped, as is Symbol and ZapfDingbats, whose high bytes are symbol
+///   codes that can happen to form UTF-8;
+/// - a Unicode-mode font ([`UNICODE_KEY`], and so a copy made by
+///   `scalefont`, `definefont` and the like) and a font that says
+///   `/PSCatUnicode false` (bytes on purpose) are left alone.
+///
+/// The Encoding is not read: a re-encoded font still gets bytes, not UTF-8.
+pub(crate) fn utf8_in_byte_font<'a>(fs: &FontState, text: &'a [u8]) -> Option<(String, &'a str)> {
+    if fs.fid < 0 || !text.iter().any(|&b| b >= 0x80) {
+        return None;
+    }
+    if outline_unicode(fs) || symbolic_encoding(fs.fid).is_some() {
+        return None;
+    }
+    let off = fs
+        .dict
+        .borrow()
+        .get(UNICODE_KEY)
+        .is_some_and(|o| matches!(o.value, Value::Boolean(false)));
+    if off {
+        return None;
+    }
+    let text = std::str::from_utf8(text).ok()?;
+    Some((font_name(fs), text))
+}
+
 /// The `FontName` of a font dict, for a message; `?` when it has none.
 fn font_name(fs: &FontState) -> String {
     match fs.dict.borrow().get("FontName").map(|o| o.value.clone()) {
@@ -2193,6 +2226,11 @@ impl ShowCtx {
     /// the font's name (at most one per step).
     pub(crate) fn take_missing(&mut self) -> Vec<(u32, String)> {
         std::mem::take(&mut self.missing)
+    }
+
+    /// The string being shown, as given (for the lint's UTF-8 check).
+    pub(crate) fn text(&self) -> &[u8] {
+        &self.text
     }
 
     pub(crate) fn set_limit_probe(&mut self, probe: crate::limits::LimitProbe) {

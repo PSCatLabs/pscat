@@ -58,6 +58,9 @@ lacks advances by `.notdef`'s width. On a Type 3 font it calls `BuildGlyph`
 with the name. A Type 3 font with only `BuildChar` gets the first Encoding
 slot holding the name, or 0, as in Ghostscript. Latin faces do not read UTF-8:
 a byte is an Encoding slot, unless the font is Unicode-mode (next section).
+`pscat --lint` reports a string of well-formed UTF-8 text shown in a byte-mode
+font as `[utf8-in-byte-font]`, since `(aπb) show` there draws a stray accent
+and nothing fails.
 
 ## Unicode text and emoji
 
@@ -106,6 +109,14 @@ baseline with a slight descent, at the size of the text around it.
 - **Not supported.** No shaping, ligatures or bidi for text: Arabic and Hebrew
   come out in logical order and unjoined, and Thai marks stack by their
   advances. Fallback faces are regular weight, whatever the font's.
+
+`pscat --lint` tells you when you forgot it: `[utf8-in-byte-font]` names the
+font, the characters and the line, for any show, `stringwidth` or `charpath` of
+a string that is wholly well-formed UTF-8 with a non-ASCII character in a font
+without the key. It stays quiet for Latin-1 and binary strings (`(caf\351)`), a
+string that mixes UTF-8 with a stray Latin-1 byte, Symbol and ZapfDingbats, user
+Type 3 fonts, a font with `/PSCatUnicode false` (bytes on purpose), and any
+`%lint: allow utf8-in-byte-font` program.
 
 The key is a pscat extension: Ghostscript ignores it and shows the bytes. The
 four catalog faces for Korean, Japanese and Thai have always been

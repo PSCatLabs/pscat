@@ -339,6 +339,7 @@ impl Options {
         if self.lint {
             interp.trace_operator_shadows();
             interp.trace_stack_leaks();
+            interp.trace_utf8_text();
         }
         // `currentfilename` (#1056) answers with the file as given; `-e`
         // wins over a file argument, `-` is stdin, which has no name, and an

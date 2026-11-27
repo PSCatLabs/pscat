@@ -252,6 +252,44 @@ fn lint_flags_a_redefined_operator_and_the_allow_comment_silences_it() {
     assert!(ok && stderr.contains("lint: clean"), "{stderr}");
 }
 
+/// #1412: `(aπb) show` in Helvetica reads the two bytes of the pi as two
+/// characters and draws a stray accent, which is correct PostScript; lint
+/// says so and names the fix. A font that opts into UTF-8, and a Latin-1
+/// string, are left alone.
+#[test]
+fn lint_flags_utf8_text_in_a_byte_font_and_names_the_fix() {
+    let font = "/Helvetica findfont 30 scalefont setfont 10 30 moveto ";
+    let src = format!("{font}(aπb) show showpage");
+    let (ok, _out, stderr) = run(&["--lint", "-"], &src);
+    assert!(ok, "{stderr}");
+    assert!(
+        stderr.contains("[utf8-in-byte-font] a string holding UTF-8 text (π U+03C0)"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("/PSCatUnicode true"), "{stderr}");
+    assert!(!stderr.contains("lint: clean"), "{stderr}");
+    // Advisory, but a finding for `--lint-strict`.
+    let (ok, _out, _stderr) = run(&["--lint-strict", "-"], &src);
+    assert!(!ok);
+    // The font the message asks for, and the Latin-1 idiom the guides teach.
+    let unicode = "/Helvetica findfont dup length dict copy dup /PSCatUnicode true put \
+                   /H-U exch definefont 30 scalefont setfont 10 30 moveto ";
+    for ok_src in [
+        format!("{unicode}(aπb) show showpage"),
+        format!("{font}(caf\\351) show showpage"),
+    ] {
+        let (_ok, _out, stderr) = run(&["--lint", "-"], &ok_src);
+        assert!(stderr.contains("lint: clean"), "{ok_src}: {stderr}");
+    }
+    // The comment silences it, and nothing else.
+    let allowed = format!("%lint: allow utf8-in-byte-font\n{src}");
+    let (_ok, _out, stderr) = run(&["--lint", "-"], &allowed);
+    assert!(stderr.contains("lint: clean"), "{stderr}");
+    // Without `--lint` nothing is traced or said.
+    let (_ok, _out, stderr) = run(&["--headless", "-"], &src);
+    assert!(!stderr.contains("utf8-in-byte-font"), "{stderr}");
+}
+
 /// #1109: the finding says where the binding was made, catches a `store`
 /// refused by the read-only systemdict (#1337), and still leaves a variable
 /// kept in a local dictionary alone.
