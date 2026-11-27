@@ -175,9 +175,9 @@ pub(crate) struct LimitProbe {
     pub(crate) memory: Option<(usize, usize)>,
 }
 
-/// Looks at the limits this thread made through [`LimitProbe::check`]: a
-/// unit test of a loop's polling counts them (each test runs on its own
-/// thread, so the count is its own).
+// Looks at the limits this thread made through `LimitProbe::check`: a
+// unit test of a loop's polling counts them (each test runs on its own
+// thread, so the count is its own).
 #[cfg(test)]
 thread_local! {
     pub(crate) static CHECKS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
