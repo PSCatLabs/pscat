@@ -56,7 +56,9 @@ Files changed: `artkit`, `paintkit`, `pagekit`, `fillkit`, `lettering`,
   `lib/hangul.ps`, `lib/typewriter.ps` and `lib/etching.ps` are untouched: they
   keep scratch variables (`i`, `n`, `uni`, `mix2`) in the caller's dictionary on
   purpose.
-- **Private-prefixed helpers outside paintkit and artkit** (`dk*`, `dc*`, `mk*`,
+- **Private-prefixed helpers outside paintkit and artkit** (drykit's three calls
+  into paintkit's `pjheight` and `pjhash` are converted, as the review found
+  them the only leaks of the other libraries) (`dk*`, `dc*`, `mk*`,
   `sg*`, `rl*`, ...): a caller does not pick those names. Left for a later pass.
 - **The turtle commands** (`fd hop tl tr tpush tpop`), which a program may
   redefine to change what an L-system draws.

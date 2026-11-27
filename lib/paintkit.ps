@@ -608,9 +608,11 @@
 %   % The block above passes on a tree without the scan bound too, because
 %   % walkpath's own pass refuses the same path. Here walkpath is replaced by
 %   % a stub (each block runs in a fresh interpreter), so only a refusal from
-%   % the scan itself passes.
+%   % the scan itself passes. The brushes reach walkpath as `//walkpath exec`
+%   % (#1225), so the stub overwrites the start of its array in place: a
+%   % redefinition of the name would never be called.
 %   /tgot false def
-%   /walkpath { pop pop /tgot true def } def
+%   /walkpath load 0 { pop pop /tgot true def } putinterval
 %   { newpath 0 0 moveto wkmaxsegs 1 sub { 0 0 rlineto } repeat 40 0 rlineto
 %     << >> pkribbon }
 %   /walkpath-segment-count-exceeds-safety-limit

@@ -468,12 +468,12 @@
         /dkkey dkkeybuf dkq get def
         /dkci dkkey 32768 idiv dki0 add def
         /dkcj dkkey 32768 mod dkj0 add def
-        /dkd dkci dkcj pjheight dkct add 1 sub def
+        /dkd dkci dkcj //pjheight exec dkct add 1 sub def
         dkd 0 gt {
             /dks dkd 0.3 div dup 1 gt { pop 1 } if 0.5 mul 0.6 add
                 dkgrow mul dkW mul def
-            /dkcx dkci 0.5 add dkci dkcj 2 pjhash 0.5 sub 0.3 mul add dkW mul def
-            /dkcy dkcj 0.5 add dkci dkcj 3 pjhash 0.5 sub 0.3 mul add dkW mul def
+            /dkcx dkci 0.5 add dkci dkcj 2 //pjhash exec 0.5 sub 0.3 mul add dkW mul def
+            /dkcy dkcj 0.5 add dkci dkcj 3 //pjhash exec 0.5 sub 0.3 mul add dkW mul def
             /dkea dks 0.8 mul dkcs mul def
             /dkg dksegbuf dkq get def
             dkg 0 ge {
