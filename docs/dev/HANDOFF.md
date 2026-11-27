@@ -931,6 +931,13 @@ renders eight examples in both and compares block-downsampled output).
   copying Ghostscript's `gs_dps2.ps`: indices to 65535, the array grows by its
   rule, and a growth is charged to the step, time and memory limits before it
   is made. `notes/1265-user-objects.md` lists the deliberate differences.
+- **Level 3 coverage test** (#1280, `tests/plrm_operators.rs`): every operator in the
+  PLRM third edition's "Operator Details" (`tests/data/plrm_operators.txt`,
+  derived by `scripts/plrm_operator_index.py`) must be in `systemdict` or listed in
+  `tests/data/plrm_operator_gaps.txt` (`missing`, each with its issue, or `omitted`, each
+  with a reason). Define an operator on that list and the test fails until you delete its
+  line; a new gap fails it until it is listed. `languagelevel` stays 2 until no `missing`
+  line is left (`notes/1280-plrm-operator-coverage-test.md`).
 
 - `resourcestatus` of a Font (#1214) uses `font::locate`, the lookup
   `findfont` is built on (`font::resolve` = `locate` plus the missing-pack
