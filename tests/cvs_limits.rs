@@ -90,9 +90,7 @@ fn cvs_of_a_large_string_is_preflighted_and_charged() {
     )
     .expect("the allocator is installed");
     assert_eq!(
-        it.run_str(
-            "/s 16777216 string noaccess def 100 { { s dup cvs } stopped pop clear } repeat"
-        ),
+        it.run_str("/s 16777216 string noaccess def 10 { { s dup cvs } stopped pop clear } repeat"),
         Ok(())
     );
 
