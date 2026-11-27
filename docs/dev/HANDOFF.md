@@ -913,6 +913,11 @@ renders eight examples in both and compares block-downsampled output).
   `serialnumber` 0 are the PLRM identity operators (#1048,
   `src/ops/level2.rs`). As PLRM operators they are not in the
   capabilities catalog, which lists only pscat extensions.
+- `defineuserobject`, `execuserobject` and `undefineuserobject` (#1265,
+  `src/ops/level2.rs`) keep objects in `userdict`'s `UserObjects` array,
+  copying Ghostscript's `gs_dps2.ps`: indices to 65535, the array grows by its
+  rule, and a growth is charged to the step, time and memory limits before it
+  is made. `notes/1265-user-objects.md` lists the deliberate differences.
 
 - `resourcestatus` of a Font (#1214) uses `font::locate`, the lookup
   `findfont` is built on (`font::resolve` = `locate` plus the missing-pack

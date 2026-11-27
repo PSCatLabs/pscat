@@ -3864,6 +3864,12 @@ impl Interp {
         found
     }
 
+    /// The permanent `userdict`: where the Level 2 user-object operators
+    /// keep `/UserObjects`, whatever dictionary is open on top of it.
+    pub(crate) fn userdict(&self) -> Rc<RefCell<Dict>> {
+        self.dstack[2].clone()
+    }
+
     /// Is `dict` the permanent systemdict? A program's writes to it are
     /// refused: Ghostscript's is read-only once initialisation ends
     /// (`systemdict /x 1 put` is `invalidaccess` there; issue #1337).
@@ -4228,6 +4234,37 @@ impl Interp {
                 old: d.borrow().clone(),
             });
         }
+    }
+
+    /// Slots the next [`journal_array`](Self::journal_array) of `a` would
+    /// copy: the whole backing store, whatever view `a` is, or 0 with no
+    /// live save or when the store is already journalled at this level. For
+    /// an operator to refuse the copy against the limits before it makes it.
+    pub(crate) fn array_snapshot_slots(&self, a: &PsArray) -> usize {
+        let Some(rec) = self.save_stack.last() else {
+            return 0;
+        };
+        if rec.seen.contains(&(Rc::as_ptr(a.data_rc()) as usize)) {
+            return 0;
+        }
+        a.storage_len()
+    }
+
+    /// The dict counterpart of [`array_snapshot_slots`](Self::array_snapshot_slots):
+    /// the table slots the next [`journal_dict`](Self::journal_dict) would
+    /// copy (entries plus the empty slots the table keeps).
+    pub(crate) fn dict_snapshot_slots(&self, d: &Rc<RefCell<Dict>>) -> usize {
+        if Rc::ptr_eq(d, &self.globaldict) {
+            return 0;
+        }
+        let Some(rec) = self.save_stack.last() else {
+            return 0;
+        };
+        if rec.seen.contains(&(Rc::as_ptr(d) as usize)) {
+            return 0;
+        }
+        let d = d.borrow();
+        d.len().saturating_add(d.slot_overhead())
     }
 
     /// The `gstate` counterpart of [`journal_array`]: `currentgstate`
