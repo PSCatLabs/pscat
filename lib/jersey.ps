@@ -3,6 +3,10 @@
 %%Creator: pscat — issue #149
 %%EndComments
 % @requires: (lib/artkit.ps) run
+% Prerequisite check (#1455): one line per @requires entry, in order, naming the
+% library to load first. It runs before any `//name` below is scanned and
+% defines nothing. tests/lib_requires_check.rs keeps it in step with that line.
+/walkpath where { pop } { (jersey needs (lib/artkit.ps) run first) errordict /undefined get exec } ifelse
 
 % A reusable athletic-jersey / sweatshirt composition: a team-like name
 % arched above a large player number, with an optional smaller caption

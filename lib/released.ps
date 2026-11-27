@@ -4,6 +4,11 @@
 %%EndComments
 
 % @requires: (lib/artkit.ps) run (lib/surfacekit.ps) run
+% Prerequisite check (#1455): one line per @requires entry, in order, naming the
+% library to load first. It runs before any `//name` below is scanned and
+% defines nothing. tests/lib_requires_check.rs keeps it in step with that line.
+/walkpath where { pop } { (released needs (lib/artkit.ps) run first) errordict /undefined get exec } ifelse
+/sfshade where { pop } { (released needs (lib/surfacekit.ps) run first) errordict /undefined get exec } ifelse
 
 % A page that has been through decades and a copier: aged paper, a scanner's
 % skew and lamp, photocopy generations (each adds its own skew, speckle and

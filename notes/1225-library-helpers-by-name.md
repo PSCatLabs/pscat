@@ -83,8 +83,8 @@ library does with it, because the library's bodies hold the procedure itself.
 first elements of `/walkpath load` in place; that works only because the
 stand-in must never be reached, since the rest of the original body would run
 after it.) A library whose `@requires` prerequisite is not loaded now fails
-while it loads (`undefined` for the first `//name`), not when a procedure
-runs.
+while it loads, not when a procedure runs (it names the library since #1455,
+`notes/1455-requires-names-the-library.md`).
 
 ### Tests
 

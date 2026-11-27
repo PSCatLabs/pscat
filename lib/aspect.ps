@@ -2,6 +2,11 @@
 %%Title: Functional PostScript — explicit procedure advice
 %%EndComments
 % @requires: (lib/functional.ps) run
+% Prerequisite check (#1455): one line per @requires entry, in order, naming the
+% library to load first. It runs before any `//name` below is scanned and
+% defines nothing. tests/lib_requires_check.rs keeps it in step with that line.
+/fp-map where { pop } { (aspect needs (lib/functional.ps) run first) errordict /undefined get exec } ifelse
+
 % Load functional.ps first. Wrappers capture targets; they never change a
 % dictionary binding automatically. Advice shares the target's operand and
 % graphics state and must obey the published contract. No finally semantics.

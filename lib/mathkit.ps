@@ -3,6 +3,11 @@
 %%Creator: pscat — issue #237
 %%EndComments
 % @requires: (lib/handscript.ps) run (lib/strokeglyphs.ps) run
+% Prerequisite check (#1455): one line per @requires entry, in order, naming the
+% library to load first. It runs before any `//name` below is scanned and
+% defines nothing. tests/lib_requires_check.rs keeps it in step with that line.
+/hs-write where { pop } { (mathkit needs (lib/handscript.ps) run first) errordict /undefined get exec } ifelse
+/sgpath where { pop } { (mathkit needs (lib/strokeglyphs.ps) run first) errordict /undefined get exec } ifelse
 
 % Lays out a small subset of TeX math as stroke skeletons: the glyph
 % centerlines of lib/strokeglyphs.ps, placed by a simplified TeX box
