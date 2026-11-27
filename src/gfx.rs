@@ -5990,21 +5990,34 @@ impl Gfx {
         let (y0, y1) = self.band_rows().unwrap_or((0, h));
         let (y0, y1) = (y0 as usize, (y1 as usize).min(h as usize));
         let stride = w as usize * 4;
+        // The list of rows is asked of the cap before it is made (#1421).
+        let rows = y1.saturating_sub(y0);
+        if let Err(e) = probe.check_alloc(rows.saturating_mul(std::mem::size_of::<usize>())) {
+            return (0, Err(e));
+        }
         // A row the group painted: some pixel not transparent, at 8 bits or
-        // (faint marks) in its shadow.
-        let painted: Vec<usize> = (y0..y1)
-            .filter(|&y| {
-                layer.data()[y * stride..(y + 1) * stride]
-                    .as_chunks::<4>()
-                    .0
-                    .iter()
-                    .any(|p| p[3] != 0)
-                    || layer_deep
-                        .row(layer, y)
-                        .is_some_and(|r| r.as_chunks::<4>().0.iter().any(|p| p[3] != 0))
-            })
-            .collect();
-        let mut work = ((y1.saturating_sub(y0)) * w as usize) as u64;
+        // (faint marks) in its shadow. The scan reads every pixel of a blank
+        // layer, so it looks at the limits as the composite below does
+        // (#1421), with the pixels read so far as the work: a run stopped on
+        // a limit drops its blank layers at once.
+        let mut painted: Vec<usize> = Vec::with_capacity(rows);
+        for (i, y) in (y0..y1).enumerate() {
+            let read = (i * w as usize) as u64;
+            if i % GROUP_POLL_ROWS == 0
+                && let Err(e) = probe.check(read / 1024)
+            {
+                return (read, Err(e));
+            }
+            let row = &layer.data()[y * stride..(y + 1) * stride];
+            if row.as_chunks::<4>().0.iter().any(|p| p[3] != 0)
+                || layer_deep
+                    .row(layer, y)
+                    .is_some_and(|r| r.as_chunks::<4>().0.iter().any(|p| p[3] != 0))
+            {
+                painted.push(y);
+            }
+        }
+        let mut work = (rows * w as usize) as u64;
         let max_memory = self.mem_budget.map(|(_, max)| max);
         let deep = self.captures.is_empty()
             && crate::deep::Deep::allowed(w, h, max_memory)
