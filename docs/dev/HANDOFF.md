@@ -1608,6 +1608,10 @@ renders eight examples in both and compares block-downsampled output).
   A zero-length subpath under square caps is dropped before either path
   (`Gfx::stroke_dropped`, #1215, `notes/1215-square-cap-zero-length-subpath.md`):
   gs draws nothing for it, tiny-skia and SVG would draw a square.
+  `stroke_dropped` also drops a zero-length segment of a subpath that has
+  length, at the start, the end or the middle, under every cap (#1224,
+  `notes/1224-zero-length-segments-in-a-stroke.md`): gs ignores it, and
+  tiny-skia would aim a cap or a join along rounding noise.
 
 - **The page size has a precedence** (#921, #909): `--page` (MCP
   `width`/`height`, any `Interp::with_page` caller) > `setpagedevice
@@ -2924,6 +2928,14 @@ renders eight examples in both and compares block-downsampled output).
   procedure's array in place, `tests/paintkit.rs`'s
   `pre_walkpath_scans_refuse_...`, and only works because the stand-in is never
   meant to return).
+  A library loaded without what its `@requires` line names fails at load, and
+  says which library: `drykit needs (lib/paintkit.ps) run first` (#1455). The
+  check is one line per prerequisite right under the tag (a `where` probe for a
+  name the prerequisite defines, then `errordict /undefined get exec`), so it
+  defines nothing and costs nothing after load. Add the line when you add a
+  prerequisite to a `@requires` line, and a probe name for a new prerequisite
+  library to `SENTINELS` in `tests/lib_requires_check.rs`, which checks every
+  library's lines against its `@requires` line.
   drychalk's `dcscratch` private dictionary still pays once the library is
   bound (20% to 30% on its specimen), so it stays. drycrayon and the older
   kits are deliberately unbound: drycrayon gained under 1%, and the rest

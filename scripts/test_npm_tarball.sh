@@ -113,7 +113,7 @@ for (let i = 0; i < img.data.length; i += 4) {
 }
 assert.ok(blue > 6000, `blue ${blue}`);
 assert.ok(black > 20, `text ${black}`);
-assert.equal(r.render('(lib/mathkit.ps) run (lib) print', { width: 10, height: 10 }).output, 'lib');
+assert.equal(r.render('(lib/handscript.ps) run (lib/strokeglyphs.ps) run (lib/mathkit.ps) run (lib) print', { width: 10, height: 10 }).output, 'lib');
 assert.throws(() => r.render('nosuchop'), (e) => e instanceof PostScriptError && e.errorName === 'undefined');
 if (!legacy) {
   r.render('0 0 1 setrgbcolor 10 10 50 50 rectfill', { width: 100, height: 100, svg: true, pdf: true });

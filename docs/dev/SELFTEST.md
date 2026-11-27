@@ -70,6 +70,10 @@ pins that property.
 - Prerequisites come from the file's existing `% @requires:` tag —
   the same one `build.rs`'s capability catalog reads. There is no
   second way to spell the load chain, so the two can't drift.
+  A library that loads without one of those prerequisites stops with
+  `<lib> needs (<path>) run first` (#1455): one check line per `@requires`
+  entry sits right under the tag, and `tests/lib_requires_check.rs` compares
+  the lines with the tag.
 - Every malformation is a hard error, never a skipped block: an
   unclosed block, a bare code line inside one, a duplicate name, an
   empty body. A self-test that silently doesn't run reads as coverage

@@ -3,6 +3,12 @@
 %%Creator: pscat — issue #239 (design: docs/dev/design/DRYMEDIA.md)
 %%EndComments
 % @requires: (lib/artkit.ps) run (lib/paintkit.ps) run (lib/drykit.ps) run
+% Prerequisite check (#1455): one line per @requires entry, in order, naming the
+% library to load first. It runs before any `//name` below is scanned and
+% defines nothing. tests/lib_requires_check.rs keeps it in step with that line.
+/walkpath where { pop } { (drycrayon needs (lib/artkit.ps) run first) errordict /undefined get exec } ifelse
+/pkribbon where { pop } { (drycrayon needs (lib/paintkit.ps) run first) errordict /undefined get exec } ifelse
+/dkstroke where { pop } { (drycrayon needs (lib/drykit.ps) run first) errordict /undefined get exec } ifelse
 
 % The crayon medium of epic #232, built on drykit's core (lib/drykit.ps):
 % every mark is `dkstroke` on a `dksurface`, and this file only decides how
