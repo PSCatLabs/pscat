@@ -217,6 +217,19 @@ for f in "${REQUIRED[@]}"; do
   grep -qx "$NAME/$f" <<<"$LISTING" || { echo "FAIL: $NAME/$f is not in the archive" >&2; exit 1; }
 done
 
+# The scratch directories made below (issue #1486). The EXIT trap removes
+# whichever exist on every way out, a `FAIL:` exit included; each variable is
+# set only once its directory exists, and the inline `rm -rf`s still tidy up
+# early on the success path. Only $ARCHIVE under $OUT_BASE is left for the caller.
+EMPTY_HOME="" TOOLS="" SYMLINK_DIR=""
+cleanup_scratch() {
+  local d
+  for d in "$EMPTY_HOME" "$TOOLS" "$SYMLINK_DIR"; do
+    if [[ -n "$d" ]]; then rm -rf "$d"; fi
+  done
+  return 0
+}
+trap cleanup_scratch EXIT
 # ---------------------------------------------------------------------------
 # Run the bundle. From outside the checkout with no $PSCAT_HOME, so exe-sibling
 # resolution (src/paths.rs) must find lib/ next to the binary: the scenario
