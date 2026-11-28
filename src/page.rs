@@ -292,6 +292,9 @@ impl crate::Interp {
     /// transparency group is open (`begingroup`) the canvas is the page
     /// below the group's layer: the exchange swaps that page, and the
     /// group still composites onto it at `endgroup`.
+    /// [`open_group_count`](crate::Interp::open_group_count) says whether one is
+    /// open, and [`innermost_group_serial`](crate::Interp::innermost_group_serial)
+    /// which.
     ///
     /// ```
     /// use pscat::{Interp, Page};

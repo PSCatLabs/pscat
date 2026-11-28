@@ -890,6 +890,11 @@ renders eight examples in both and compares block-downsampled output).
   (`restore_glyph_snapshot`, `leave_capture`, `showpage`/`copypage`/`erase`,
   `step_n` at the end of a program); a new such route must too.
   `notes/1406-transparency-groups.md`.
+  `Interp::open_group_count()` and `innermost_group_serial()` (#1494, `host.rs`,
+  `notes/1494-open-group-query.md`) read `Gfx::groups` for a host (psanim): the
+  groups with `captures == 0` (the page's, the ones `swap_canvas` and a
+  `PaintProc`'s `endgroup` see), and `Group::serial` from the never-reset
+  `Gfx::groups_opened`. Keep them pure reads on `&self`.
 - `gstate .sameclip bool` (issue #488) is a third pscat extension, dot-named
   because it is non-standard (gs has no `.sameclip`): true when the clip in
   force is the very clip chain the gstate holds (both none, or the same

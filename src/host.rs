@@ -4,7 +4,7 @@
 //! The rest of the supported API runs a program and reads its pages. This
 //! module is for a host that does more than that: an animation engine that
 //! calls one procedure per frame, an editor that feeds a program live input,
-//! a server that gives programs a few operators of its own. It has eight
+//! a server that gives programs a few operators of its own. It has nine
 //! parts, all methods on [`Interp`]:
 //!
 //! - **Operators.** [`Interp::register_operator`] adds an operator backed by
@@ -36,6 +36,12 @@
 //!   [`Interp::set_utf8_text_check`] turns on the `[utf8-in-byte-font]` lint
 //!   for a host that runs programs itself, and [`Interp::utf8_text_findings`]
 //!   reads what it found, with the file and line.
+//! - **Open transparency groups.** [`Interp::open_group_count`] says how many
+//!   `begingroup`s are open on the page, by whatever route they were opened,
+//!   and [`Interp::innermost_group_serial`] names the innermost one, so a host
+//!   that composes its own layers with
+//!   [`swap_canvas`](crate::Interp::swap_canvas) can tell when the canvas is
+//!   not the page, and whether it is still the same group.
 //!
 //! Like the rest of the crate API, all of it is Experimental
 //! ([`docs/STABILITY.md`](https://github.com/PSCatLabs/pscat/blob/main/docs/STABILITY.md)):
@@ -1398,5 +1404,112 @@ impl Interp {
         self.utf8_text_trace()
             .map(crate::lint::Utf8TextTrace::report)
             .unwrap_or_default()
+    }
+
+    /// How many transparency groups (`begingroup`) are open on the page now,
+    /// as the interpreter itself counts them (#1494). A group counts however
+    /// it was opened (the operator named in a program, `systemdict /begingroup
+    /// get exec`, a procedure that calls it) and stops counting the moment
+    /// the interpreter closes it: at its `endgroup`, at `erasepage`,
+    /// `showpage` or `copypage`, at a `restore` that unwinds past it, when
+    /// the program ends, and when an uncaught error, a limit or the
+    /// interrupt flag stops it. A caught error does not close a group:
+    /// `{ ... begingroup ... error } stopped` leaves it open, as it leaves a
+    /// `gsave` open. A program that a host runs in slices
+    /// ([`begin_source`](Interp::begin_source), [`step_n`](Interp::step_n))
+    /// keeps its groups open between slices until it finishes.
+    ///
+    /// This is the host's answer to "is the canvas the page?". With a group
+    /// open, the raster the program paints on is the group's layer, and
+    /// [`swap_canvas`](Interp::swap_canvas) exchanges the page *below* it,
+    /// which the group still composites onto at its `endgroup`. So a host
+    /// that paints its own layers with `swap_canvas` finds that a layer
+    /// swapped in while the count is above 0 is not painted on until the
+    /// group closes. One exception: a group opened while nothing paints
+    /// (after `nulldevice`) has no layer, is counted, and displaces
+    /// nothing.
+    ///
+    /// The count is the page's, from anywhere. Inside a pattern's
+    /// `PaintProc` it is still the number of groups the page has open (the
+    /// ones opened before the pattern was painted), and the `PaintProc`'s own
+    /// groups are not counted: they live on the tile, which a host cannot
+    /// reach with `swap_canvas`. A `PaintProc` cannot close the page's
+    /// groups either: its `endgroup` with none of its own open does nothing,
+    /// so the count does not change. With no page group open the count is 0
+    /// inside a `PaintProc`, where `swap_canvas` hands the page back
+    /// unchanged (there is no page to exchange).
+    ///
+    /// A read of the interpreter's state: it costs no steps, memory or time
+    /// against the limits, and changes nothing. Like the rest of the crate
+    /// API this is Experimental (`docs/STABILITY.md`): it can change in any
+    /// release. [`innermost_group_serial`](Self::innermost_group_serial)
+    /// says which group the innermost is.
+    ///
+    /// ```
+    /// use std::{cell::RefCell, rc::Rc};
+    /// let mut interp = pscat::Interp::with_page(2, 2).expect("valid page size");
+    /// // A host operator reads the count while the program runs.
+    /// let seen = Rc::new(RefCell::new(Vec::new()));
+    /// let log = seen.clone();
+    /// interp.register_operator("groups", move |i| {
+    ///     log.borrow_mut().push(i.open_group_count());
+    ///     Ok(())
+    /// })?;
+    /// interp.run_str("groups << >> begingroup groups
+    ///                 << >> systemdict /begingroup get exec groups
+    ///                 endgroup groups erasepage groups")?;
+    /// // None, one, two (opened through `systemdict`), one again, and
+    /// // `erasepage` closed the last.
+    /// assert_eq!(*seen.borrow(), [0, 1, 2, 1, 0]);
+    /// assert_eq!(interp.open_group_count(), 0); // and none after the run
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn open_group_count(&self) -> usize {
+        self.gfx().page_group_count()
+    }
+
+    /// Which group is the innermost one open on the page: its serial, or
+    /// `None` with no group open (#1494). A serial is the number of groups
+    /// the interpreter has opened when this one began, counting from 1, so it
+    /// is the group's own, fixed when it opens (groups opened and closed inside
+    /// it do not change it), monotonic, and never repeats for the life of the interpreter: not
+    /// after the group is closed, not after a `restore` or a page boundary
+    /// closed it, not across runs. Equal serials mean the same group.
+    ///
+    /// A count alone cannot say this. A procedure the host calls can close
+    /// the group it is inside and open another at the same depth, and
+    /// [`open_group_count`](Self::open_group_count) is the same before and
+    /// after; the serial differs. Compare serials to ask "is the innermost
+    /// group still the one I saw?".
+    ///
+    /// Like the count, it is the page's: inside a pattern's `PaintProc` it is
+    /// the innermost group the page has open (the `PaintProc`'s own groups,
+    /// which the tile holds, are not reported, though they take a serial from
+    /// the same counter), and a `PaintProc`'s `endgroup` with none of its own
+    /// open does not change it. A read: no steps, memory or time are charged.
+    /// Experimental like the rest of the crate API.
+    ///
+    /// ```
+    /// use std::{cell::RefCell, rc::Rc};
+    /// let mut interp = pscat::Interp::with_page(10, 10).expect("valid page size");
+    /// let seen = Rc::new(RefCell::new(Vec::new()));
+    /// let log = seen.clone();
+    /// interp.register_operator("serial", move |i| {
+    ///     log.borrow_mut().push(i.innermost_group_serial());
+    ///     Ok(())
+    /// })?;
+    /// // Close a group and open another at the same depth: the count is 1
+    /// // both times, the serial is not.
+    /// interp.run_str("serial << >> begingroup serial serial endgroup
+    ///                 << >> begingroup serial")?;
+    /// let s = seen.borrow();
+    /// assert_eq!(s[0], None);
+    /// assert_eq!(s[1], s[2]); // the same group twice
+    /// assert!(s[3] > s[1]);   // a different one, later
+    /// assert_eq!(interp.innermost_group_serial(), None); // closed with the run
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn innermost_group_serial(&self) -> Option<u64> {
+        self.gfx().innermost_page_group_serial()
     }
 }

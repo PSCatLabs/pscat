@@ -445,6 +445,34 @@ run the host stops with its interrupt flag drops the open groups, as a time
 limit does; a step limit composites what they painted. Either way the next run
 starts on a whole page.
 
+`open_group_count()` says how many groups are open on the page (by whatever route
+a program opened them: `systemdict /begingroup get exec` too; closed by
+`endgroup`, `erasepage`, `showpage`, `copypage`, a `restore` or the end of the
+run, but not by a caught error, which leaves a group open as it leaves a
+`gsave`), and `innermost_group_serial()` is a number for the innermost one,
+`None` with none open. A serial is never reused by the interpreter, so equal
+serials are the same group; a count alone cannot tell that a procedure closed
+the group and opened another at the same depth. Above 0, `swap_canvas` exchanges
+the page below the group's layer (except for a group opened under `nulldevice`,
+which has no layer). Both answer for the page from anywhere: inside a pattern's
+`PaintProc` they report the page's groups, not the `PaintProc`'s own, and the
+`PaintProc`'s `endgroup` with none of its own open does not change them (with no
+page group open, the count there is 0 and `swap_canvas` hands the page back).
+They are reads: no steps, time or memory are charged and nothing is drawn
+differently (`notes/1494-open-group-query.md`).
+
+```rust
+let mut interp = pscat::Interp::with_page(100, 100).expect("valid page size");
+interp.begin_source(b"<< >> begingroup 1 0 0 setrgbcolor 0 0 40 48 rectfill");
+while interp.open_group_count() == 0 {
+    interp.step_n(1)?;
+}
+let group = interp.innermost_group_serial(); // Some(1)
+assert!(group.is_some()); // so `swap_canvas` now addresses the page below it
+while interp.step_n(100)? {}
+assert_eq!(interp.open_group_count(), 0); // the end of the run closed it
+```
+
 **Errors as data.** `error_details` gives the error's name, offending command,
 line and file as fields, and a backtrace: the procedures that were running,
 innermost first, each with the element that was running marked among its
