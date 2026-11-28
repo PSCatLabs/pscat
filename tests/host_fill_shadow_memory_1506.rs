@@ -27,7 +27,7 @@ fn the_drop_allocates_nothing_and_gives_the_shadow_back() {
     assert_eq!(it.canvas_premultiplied_rgba8(), &pixels[..]);
     let freed = held.saturating_sub(after);
     assert!(
-        freed >= 7 * MIB && freed <= 9 * MIB,
+        (7 * MIB..=9 * MIB).contains(&freed),
         "the shadow is 8 bytes a pixel: freed {freed}"
     );
     // Again: nothing more to free, nothing allocated.
