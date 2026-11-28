@@ -124,6 +124,9 @@ pub fn run_interactive(
     } else {
         false
     };
+    // No `hand_over_stdout` needed here: no program has run yet in this
+    // window (a prelude starts after the banner), so the timed buffer holds
+    // nothing.
     println!(
         "pscat {} — interactive: type PostScript here, watch it draw in the window.",
         env!("PSCAT_VERSION")
@@ -506,6 +509,9 @@ impl App {
             }
             return;
         }
+        // Program stdout a timed run held back goes ahead of the prompt
+        // (#1457).
+        let _ = crate::hand_over_stdout();
         if state.eof {
             println!();
             event_loop.exit();

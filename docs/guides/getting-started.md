@@ -286,7 +286,15 @@ More on the less obvious ones:
   `--bands` band, for steps and time; memory is shared by the bands);
   `handwrite`, `typewrite` and `photo-etch` run a measuring pass and then the
   render and give each the full limits. Reading a whole file (`file`, `run`)
-  charges one step per KiB.
+  charges one step per KiB. On Linux and macOS a program's write to stdout or
+  `%stderr` that waits on a pipe or stream socket nobody reads stops at
+  `--max-time` too (what was written stays written), and with the limit not
+  reached the output and its order against stderr are what they are without
+  one. The guarantee is for pscat as the pipe's one writer: another process
+  writing into the same pipe can still leave a write waiting. To a terminal,
+  a file, a datagram socket or (macOS) a named FIFO, on Windows, and for
+  pscat's own messages after the run, a write still waits for as long as it
+  takes.
 - **Parallel bands.** `--bands N` (1 to 64) renders a PNG on N threads and
   stitches it into one page; the PNG is byte for byte the plain `--png`
   render. The page is cut into more horizontal bands than threads (by

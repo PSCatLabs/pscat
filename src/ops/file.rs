@@ -194,13 +194,13 @@ pub(super) fn write_bytes(it: &mut Interp, f: &FileHandle, bytes: &[u8]) -> Resu
         None => return Err(PsError::Io),
         Some(Sink::Disk(_)) => true,
         Some(Sink::Stderr) => {
-            return it.write_stderr(bytes, false).map_err(|_| PsError::Io);
+            return it.write_stderr(bytes, false);
         }
         Some(Sink::Stdout) => false,
     };
     if !disk {
         // Through the interpreter, outside the borrow.
-        return it.write_stdout(bytes, false).map_err(|_| PsError::Io);
+        return it.write_stdout(bytes, false);
     }
     // A disk file: count the bytes against the write cap first (issue #762).
     it.charge_write_bytes(bytes.len() as u64)?;
@@ -218,11 +218,11 @@ fn flush_output(it: &mut Interp, f: &FileHandle) -> Result<(), PsError> {
         Some(Sink::Disk(d)) => d.flush(),
         Some(Sink::Stderr) => {
             drop(file);
-            it.write_stderr(&[], true).map_err(|_| PsError::Io)
+            it.write_stderr(&[], true)
         }
         Some(Sink::Stdout) => {
             drop(file);
-            it.write_stdout(&[], true).map_err(|_| PsError::Io)
+            it.write_stdout(&[], true)
         }
     }
 }
@@ -275,7 +275,7 @@ fn writehexstring(it: &mut Interp) -> Result<(), PsError> {
 /// flush — push `print` and `%stdout` output out now, and the buffered
 /// bytes of every disk file the program has open.
 fn flush(it: &mut Interp) -> Result<(), PsError> {
-    it.write_stdout(&[], true).map_err(|_| PsError::Io)?;
+    it.write_stdout(&[], true)?;
     // A file whose write failed reports that from its own `closefile`, not
     // from every `flush` in the program.
     let _ = it.flush_files();

@@ -276,6 +276,14 @@ from the program, should call `check_limits(steps)` as it goes and return its
 error with `?`. It charges the steps and gives the same uncatchable error the
 interpreter would, or `PsError::Interrupted` for a raised flag.
 
+With a time limit or an interrupt flag set, a program's write to the
+process's stdout or stderr that waits on a pipe or socket (Linux, macOS) is
+held to them as well: it stops with the limit's error, or `Interrupted`,
+instead of blocking on a reader that never reads. With neither set, or with
+stdout captured (`capture_stdout`), writing is unchanged, and on that path
+stdout keeps std's line buffering, so the output and its order against
+stderr are the same as without a limit.
+
 ```rust
 interp.register_operator("spin", |i| {
     let n = i.pop_int()?;

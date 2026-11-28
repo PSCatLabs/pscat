@@ -596,6 +596,7 @@ fn run_band(
             Some(report)
         }
     };
+    let _ = pscat::hand_over_stdout();
     let _ = std::io::stdout().flush();
     // Files the program left open go out now, and a write that was lost
     // fails the band, as it fails a plain render (#762).

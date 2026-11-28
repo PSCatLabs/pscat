@@ -630,6 +630,9 @@ impl Server {
     /// reply is one line.
     fn send(&self, reply: &Value) {
         let line = format!("{reply}\n");
+        // No `hand_over_stdout` needed: the server runs no program in this
+        // process (its renders are `pscat` child processes), so the timed
+        // stdout buffer (#1457) is never used here.
         let mut out = std::io::stdout().lock();
         let _ = out.write_all(line.as_bytes());
         let _ = out.flush();

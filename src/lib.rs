@@ -255,6 +255,9 @@ pub mod spool;
 #[doc(hidden)]
 pub mod svg;
 pub(crate) mod textrun;
+// A stdout/stderr write the run's deadline can stop (#1457): `poll(2)`.
+#[cfg(unix)]
+pub(crate) mod timed_write;
 pub(crate) mod type1;
 #[cfg(target_arch = "wasm32")]
 #[doc(hidden)]
@@ -273,6 +276,42 @@ pub mod write_roots;
 
 pub use error::PsError;
 pub use interp::Interp;
+
+/// Send program stdout a timed run left in its line buffer (#1457), as a
+/// flush of std's stdout would, before writing to stdout yourself: the CLI
+/// calls it ahead of its own output, its prompts and its last flush, so the
+/// two keep the order they have without a time limit. A write that fails
+/// keeps the bytes and returns the error (a reader that went away is
+/// `BrokenPipe`), so a later call fails again, as std's flush does. Waits
+/// for the reader like a plain write; `Ok` off unix and when nothing is held.
+#[doc(hidden)]
+pub fn hand_over_stdout() -> std::io::Result<()> {
+    #[cfg(unix)]
+    return timed_write::send_line(None);
+    #[cfg(not(unix))]
+    Ok(())
+}
+
+/// Whether program stdout a finished timed run left buffered was dropped
+/// because its time limit passed before stdout took it (#1457). The run
+/// itself succeeded, so the CLI reports the limit when it exits.
+#[doc(hidden)]
+pub fn stdout_dropped_at_limit() -> bool {
+    #[cfg(unix)]
+    return timed_write::stdout_dropped_at_limit();
+    #[cfg(not(unix))]
+    false
+}
+
+/// Write what a timed run left in its stdout line buffer, for a thread
+/// about to `process::exit` while the interpreter may be blocked (#1457):
+/// no lock is waited on, and the write waits for room at most one polling
+/// interval (10 ms); what stdout has not taken by then is dropped.
+#[doc(hidden)]
+pub fn drain_stdout_now() {
+    #[cfg(unix)]
+    timed_write::drain_now();
+}
 pub use limits::{Limit, Limits, LimitsError};
 pub use memtrack::TrackingAllocator;
 #[doc(hidden)]

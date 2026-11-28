@@ -705,6 +705,10 @@ pub struct Interp {
     /// Set by the CLI's single-run path: dropping this `Interp` leaves the
     /// dictionary graph alone (see `Drop for Interp`).
     keep_dicts_on_drop: bool,
+    /// Set by the CLI: `Drop` leaves a timed run's buffered stdout to the
+    /// process's own flushes (#1457). See
+    /// [`leave_stdout_to_process`](Interp::leave_stdout_to_process).
+    leave_stdout: bool,
     /// When set, `=`, `==`, `stack`, `pstack` and `print` append here
     /// instead of writing to the process's stdout (issue #252). The
     /// browser build turns it on, since a wasm32 module has no stdout,
@@ -714,6 +718,11 @@ pub struct Interp {
     /// Set once the capture buffer has dropped output and carries the
     /// truncation note; later writes are discarded.
     stdout_truncated: bool,
+    /// What fd 1 and fd 2 are, for the timed path (#1457): looked at on
+    /// the first write of a run, not before (a host may move the
+    /// descriptors between runs), and forgotten when the next run starts.
+    #[cfg(unix)]
+    fd_kinds: Cell<[Option<crate::timed_write::FdKind>; 2]>,
     /// When set, what the program writes to stderr (`(%stderr)` files,
     /// `handleerror`, `findfont`'s stand-in notes) is dropped; the notes
     /// still collect in `font_warnings`. `pscat --bands` sets it on every
@@ -1015,8 +1024,11 @@ impl Interp {
             resources: Default::default(),
             patterns: Default::default(),
             keep_dicts_on_drop: false,
+            leave_stdout: false,
             stdout_capture: None,
             stdout_truncated: false,
+            #[cfg(unix)]
+            fd_kinds: Cell::new([None; 2]),
             quiet_stderr: false,
             limits: Limits::none(),
             max_page_pixels: None,
@@ -1127,6 +1139,8 @@ impl Interp {
         self.poll_in = POLL_PERIOD;
         self.slice_budget = self.slice_left;
         self.run_clock = crate::clock::Clock::start();
+        #[cfg(unix)]
+        self.fd_kinds.set([None; 2]);
         self.decode_budget.reset(self.limit_probe());
         crate::mesh::reset_pending();
         self.refresh_frame_probes();
@@ -1489,6 +1503,8 @@ impl Interp {
         self.error_chain.clear();
         self.error_trace.clear();
         self.host_steps_pending.set(0);
+        #[cfg(unix)]
+        self.fd_kinds.set([None; 2]);
         if !self.limits.is_none() {
             self.steps_used = 0;
             self.poll_in = POLL_PERIOD;
@@ -1529,6 +1545,8 @@ impl Interp {
             match self.limit_budget(budget) {
                 Ok(n) => n,
                 Err(e) => {
+                    #[cfg(unix)]
+                    self.stdout_at_end(false, false);
                     self.snapshot_error_chain(&e);
                     self.unwind_all();
                     return Err(e);
@@ -1557,6 +1575,13 @@ impl Interp {
         }
         if limited {
             result = self.after_slice(result);
+        }
+        // The run is over: under a time limit, its buffered stdout is held
+        // to the limit wherever it is sent later, never by a flush that
+        // could block (#1457).
+        #[cfg(unix)]
+        if result.is_err() || matches!(result, Ok(false)) || self.quit_requested {
+            self.stdout_at_end(result.is_ok(), false);
         }
         if result.is_err() || self.quit_requested {
             // Every uncaught error, limits included, passes here with the
@@ -4914,6 +4939,19 @@ impl Interp {
         self.keep_dicts_on_drop = true;
     }
 
+    /// The process sends program stdout a timed run left buffered itself,
+    /// with [`hand_over_stdout`](crate::hand_over_stdout) at its own flush
+    /// points (#1457): dropping this `Interp` then leaves those bytes in the
+    /// shared line buffer, as std's stdout buffer outlives an interpreter,
+    /// instead of sending them. For the `pscat` CLI, whose sweep frames and
+    /// band workers are interpreters that come and go between its flushes.
+    /// Without it (a library user), `Drop` sends them, held to the run's
+    /// deadline.
+    #[doc(hidden)]
+    pub fn leave_stdout_to_process(&mut self) {
+        self.leave_stdout = true;
+    }
+
     #[doc(hidden)]
     pub fn last_executed_name(&self) -> Option<String> {
         self.last_name
@@ -5255,15 +5293,133 @@ impl Interp {
     }
 
     /// Program output to stderr, unless [`quiet_stderr`](Self::quiet_stderr)
-    /// is on.
-    pub(crate) fn write_stderr(&self, bytes: &[u8], flush: bool) -> std::io::Result<()> {
+    /// is on. Under a time limit, a write to a pipe or socket that would
+    /// block past it stops with the limit's error (#1457); any other failure
+    /// is `ioerror`.
+    pub(crate) fn write_stderr(&self, bytes: &[u8], flush: bool) -> Result<(), PsError> {
         use std::io::Write;
         if self.quiet_stderr {
             return Ok(());
         }
+        #[cfg(unix)]
+        if self.timed_output() {
+            let kind = self.fd_kind(2);
+            if kind != crate::timed_write::FdKind::Blocking {
+                // std's stderr is unbuffered, so a direct write is what it
+                // does too, serialised between threads by a lock taken
+                // within the deadline.
+                return crate::timed_write::stderr_write(kind, bytes, &mut || self.write_look())
+                    .map_err(|stop| match stop {
+                        crate::timed_write::WriteStop::Limit(e) => e,
+                        crate::timed_write::WriteStop::Io(_) => PsError::Io,
+                    });
+            }
+        }
         let mut err = std::io::stderr();
-        err.write_all(bytes)?;
-        if flush { err.flush() } else { Ok(()) }
+        err.write_all(bytes)
+            .and_then(|()| if flush { err.flush() } else { Ok(()) })
+            .map_err(|_| PsError::Io)
+    }
+
+    /// Whether program output takes the timed path (#1457): a time limit
+    /// or a host interrupt flag is set. With neither, a write blocks as it
+    /// always did.
+    #[cfg(unix)]
+    fn timed_output(&self) -> bool {
+        self.limits.max_time.is_some() || self.interrupt.is_some()
+    }
+
+    /// A run that ends (or an interpreter dropped) with program stdout
+    /// still in the line buffer (#1457): under a time limit, record the
+    /// deadline its later send is held to. Nothing is sent here, so the
+    /// bytes leave where they would without a limit (after an error report,
+    /// a `--profile` table, and so on). The deadline is the run's, but at
+    /// least `END_GRACE` (50 ms) away, so a run stopped at its limit still
+    /// sends its last line to a reader that takes it; past it the bytes are
+    /// dropped, and for a `finished` run that is noted for the CLI to report
+    /// (see [`end_of_run`](crate::timed_write::end_of_run)). `keep` leaves
+    /// a deadline already recorded. Only under a time limit: with an
+    /// interrupt flag alone there is no deadline to hold the send to.
+    #[cfg(unix)]
+    fn stdout_at_end(&self, finished: bool, keep: bool) {
+        let Some(max) = self.limits.max_time else {
+            return;
+        };
+        if !crate::timed_write::owned_by(self.host_id) {
+            return;
+        }
+        let used = std::time::Duration::from_millis(self.run_clock.elapsed_ms().max(0) as u64);
+        let deadline = std::time::Instant::now() + max.saturating_sub(used);
+        crate::timed_write::end_of_run(self.host_id, finished, deadline, keep);
+    }
+
+    /// What fd 1 or fd 2 is this run, looked at once per run.
+    #[cfg(unix)]
+    fn fd_kind(&self, fd: usize) -> crate::timed_write::FdKind {
+        let mut kinds = self.fd_kinds.get();
+        let slot = &mut kinds[fd - 1];
+        if let Some(kind) = *slot {
+            return kind;
+        }
+        let kind = crate::timed_write::classify(fd as libc::c_int);
+        *slot = Some(kind);
+        self.fd_kinds.set(kinds);
+        kind
+    }
+
+    /// The look a timed write takes while it waits on its reader: the host's
+    /// interrupt flag and the time limit, read as a slice's end reads it.
+    /// Not gated on a running program: the end-of-run room check runs after
+    /// the program has finished, and is held to the run's deadline too.
+    #[cfg(unix)]
+    fn write_look(&self) -> Result<(), PsError> {
+        if self.interrupted() {
+            return Err(PsError::Interrupted);
+        }
+        if let Some(max) = self.limits.max_time
+            && self.run_clock.elapsed_ms() as u128 >= max.as_millis()
+        {
+            return Err(PsError::TimeExceeded);
+        }
+        Ok(())
+    }
+
+    /// Program stdout on the timed path: through
+    /// [`crate::timed_write::line_write`], std's line buffering on a write
+    /// that waits no longer than the limit; straight through while another
+    /// interpreter owns that buffer.
+    ///
+    /// std's own stdout buffer is not flushed first: nothing in pscat leaves
+    /// bytes there across a run (the CLI writes whole lines or flushes, and
+    /// the timed buffer is sent, not moved into std's), and its flush could
+    /// not be held to the deadline. An embedder's unflushed `print!` before
+    /// a run comes after the program's output.
+    #[cfg(unix)]
+    fn write_stdout_timed(
+        &mut self,
+        kind: crate::timed_write::FdKind,
+        bytes: &[u8],
+        flush: bool,
+    ) -> Result<(), PsError> {
+        let id = self.host_id;
+        let mut look = || self.write_look();
+        let written = match crate::timed_write::line_write(id, kind, bytes, flush, &mut look) {
+            Ok(crate::timed_write::LineWrite::Done) => Ok(()),
+            Ok(crate::timed_write::LineWrite::NotOwner) => {
+                crate::timed_write::direct_write(kind, bytes, &mut look)
+            }
+            Err(e) => Err(e),
+        };
+        match written {
+            Ok(()) => Ok(()),
+            Err(crate::timed_write::WriteStop::Limit(e)) => Err(e),
+            Err(crate::timed_write::WriteStop::Io(e)) => {
+                if e.kind() == std::io::ErrorKind::BrokenPipe {
+                    self.stdout_epipe_error = true;
+                }
+                Err(PsError::Io)
+            }
+        }
     }
 
     /// What has been printed since [`Interp::capture_stdout`]; empty when
@@ -5310,10 +5466,32 @@ impl Interp {
 
     /// Program output: to the capture buffer when one is on, else stdout
     /// (flushed when `flush` is set, as `print` does: a prompt with no
-    /// newline must still appear).
-    pub(crate) fn write_stdout(&mut self, bytes: &[u8], flush: bool) -> std::io::Result<()> {
+    /// newline must still appear). Under a time limit, a write to a pipe or
+    /// socket that would block past it stops with the limit's error
+    /// (#1457); any other failure is `ioerror`, with a reader that went
+    /// away noted for the CLI ([`stdout_epipe_error`](Self::stdout_epipe_error)).
+    pub(crate) fn write_stdout(&mut self, bytes: &[u8], flush: bool) -> Result<(), PsError> {
         use std::io::Write;
         let Some(buf) = self.stdout_capture.as_mut() else {
+            #[cfg(unix)]
+            if self.timed_output() {
+                let kind = self.fd_kind(1);
+                if kind != crate::timed_write::FdKind::Blocking {
+                    return self.write_stdout_timed(kind, bytes, flush);
+                }
+            }
+            // Bytes this interpreter's timed run left in the line buffer go
+            // first, as they would from std's buffer, and a failure to send
+            // them is this write's (one relaxed load when it owns none).
+            #[cfg(unix)]
+            if crate::timed_write::owned_by(self.host_id)
+                && let Err(e) = crate::timed_write::send_line(Some(self.host_id))
+            {
+                if e.kind() == std::io::ErrorKind::BrokenPipe {
+                    self.stdout_epipe_error = true;
+                }
+                return Err(PsError::Io);
+            }
             let mut out = std::io::stdout();
             let written = out
                 .write_all(bytes)
@@ -5323,7 +5501,7 @@ impl Interp {
             {
                 self.stdout_epipe_error = true;
             }
-            return written;
+            return written.map_err(|_| PsError::Io);
         };
         if self.stdout_truncated || bytes.is_empty() {
             return Ok(());
@@ -5464,6 +5642,21 @@ impl Drop for Interp {
         // Before the early return below: a file kept alive by the leaked
         // dictionary graph would otherwise never be flushed.
         let _ = self.flush_files();
+        // Program stdout this interpreter's timed run left in the line
+        // buffer (#1457). A run that ended recorded the deadline its send is
+        // held to; one dropped mid-run under a time limit records it here.
+        // The CLI sends it at its own flush points, as std's buffer would be
+        // flushed there, so the bytes are only given up; a library user's is
+        // sent now. Another interpreter's bytes are not touched. A failure
+        // keeps them for the CLI's last flush to report.
+        #[cfg(unix)]
+        {
+            self.stdout_at_end(false, true);
+            if !self.leave_stdout {
+                let _ = crate::timed_write::send_line(Some(self.host_id));
+            }
+            crate::timed_write::release(self.host_id);
+        }
         if self.keep_dicts_on_drop {
             return;
         }

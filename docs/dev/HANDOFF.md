@@ -1820,6 +1820,31 @@ renders eight examples in both and compares block-downsampled output).
     empty body never yields an object, so `next_item` calls `tick()` on every
     `Iterate*` action to poll the limits itself; a new loop-like frame must tick
     too, or `{ } loop` hangs again.
+  - A program's stdout/stderr write can block on a reader (#1457), so under a
+    time limit or an interrupt flag `Interp::write_stdout`/`write_stderr` take
+    `src/timed_write.rs` for an anonymous pipe or a stream socket: a write no
+    bigger than the room (Linux: `pwritev2(RWF_NOWAIT)`; macOS: `fstat`'s free
+    space, letting a full pipe grow 16 -> 64 KiB; `send(MSG_DONTWAIT)` on a
+    Linux socket), never `O_NONBLOCK` (the description is shared). Stdout
+    keeps std's `LineWriter` rules exactly in `timed_write::LINE` (1024
+    bytes, owned by one `Interp` at a time), so `2>&1` order and the operator
+    a write error surfaces in are the plain path's; never flush it at a slice
+    end. At the end of a timed run nothing is sent: the deadline is recorded, and
+    the bytes leave at the next flush point through the timed writer, never
+    after a "has room" prediction (the PR #1465 confirmation round found two
+    that were wrong) and never earlier than std would send them (round 4:
+    sending at the run's end put them before `--profile`'s table). The CLI's
+    interpreters (`leave_stdout_to_process`) leave them in the buffer on
+    `Drop`; a finished run's dropped bytes make `main` report
+    `limitexceeded (time)` and exit 1. Anything else that writes to stdout sends it first with
+    `pscat::hand_over_stdout()` and passes its error on (the CLI's
+    `stdout_text`/`flush_stdout`, the window prompt, bands; the owner's `Drop`
+    sends its own). A
+    new writer to fd 1 or 2 goes through those two methods and passes their
+    `PsError` up unchanged (a `map_err` to `Io` would make the stop
+    catchable). No limit, a file, a terminal, a datagram socket, a macOS named
+    FIFO, Windows: the old blocking write. `tests/stdout_deadline.rs` compares
+    merged output with and without a limit; `notes/1457-stdout-write-deadline.md`.
   - A whole-file read (`file`, `run`) is inside one operator, so it polls the
     limits itself (#702): `ops/file.rs` `read_resource` takes
     `file::read_path_limited` (64 KiB chunks, a helper thread for anything that

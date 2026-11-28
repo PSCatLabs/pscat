@@ -57,7 +57,9 @@ fn stdout_is_closed() -> bool {
 
 /// Flush stdout, noting a reader that has gone like [`stdout_text`].
 fn flush_stdout() {
-    if let Err(e) = io::stdout().flush()
+    // A timed run's held-back stdout first (#1457); its failure is this
+    // flush's, as it would be from std's buffer.
+    if let Err(e) = pscat::hand_over_stdout().and_then(|()| io::stdout().flush())
         && e.kind() == io::ErrorKind::BrokenPipe
     {
         note_stdout_closed();
@@ -88,7 +90,10 @@ fn stdout_text(args: std::fmt::Arguments<'_>) {
     if STDOUT_CLOSED.load(Relaxed) {
         return;
     }
-    if let Err(e) = io::stdout().lock().write_fmt(args) {
+    // Program stdout a timed run held back comes before the CLI's own
+    // (#1457), as it does without a limit, and a failure to send it fails
+    // this write, as std's buffered bytes would.
+    if let Err(e) = pscat::hand_over_stdout().and_then(|()| io::stdout().lock().write_fmt(args)) {
         if e.kind() != io::ErrorKind::BrokenPipe {
             panic!("failed printing to stdout: {e}");
         }
@@ -332,6 +337,10 @@ impl Options {
         self.check_pixel_cap()?;
         let mut interp = Interp::with_page_scaled(w, h, scale)
             .ok_or_else(|| format!("unusable page size {w}x{h}"))?;
+        // A timed run's buffered stdout leaves at this binary's own flushes
+        // (`stdout_text`, `flush_stdout`), as std's buffer does, not when a
+        // sweep frame's or band worker's interpreter is dropped (#1457).
+        interp.leave_stdout_to_process();
         let gfx = interp.gfx_mut();
         gfx.set_page_origin(self.page_origin.0, self.page_origin.1);
         gfx.set_page_size_source(self.page_source);
@@ -459,6 +468,17 @@ fn main() -> ExitCode {
     flush_stdout();
     if STDOUT_CLOSED.load(std::sync::atomic::Ordering::Relaxed) {
         return ExitCode::from(EXIT_STDOUT_CLOSED);
+    }
+    // A run that finished under `--max-time` with a partial line its stdout
+    // did not take within the limit: the line was dropped where it would
+    // have been flushed, after everything else, so the limit is reported
+    // here (#1457).
+    if pscat::stdout_dropped_at_limit() {
+        eprintln!(
+            "pscat: limitexceeded (time): the program's last stdout bytes were not taken \
+             within --max-time and were dropped"
+        );
+        return ExitCode::FAILURE;
     }
     code
 }
@@ -963,6 +983,9 @@ fn exit_with_parent(parent: u32) {
                     // that just died, and a failed write would panic this
                     // thread instead of ending the process.
                     let _ = writeln!(io::stderr(), "pscat: the parent process is gone; stopping");
+                    // What a timed run held back of stdout: as much as goes
+                    // out at once (std's exit flush does its own buffer).
+                    pscat::drain_stdout_now();
                     std::process::exit(1);
                 }
                 std::thread::sleep(std::time::Duration::from_millis(500));
