@@ -260,8 +260,9 @@ writes a frame at grid size. Look a character up through the font's `/Encoding`
 (code, then glyph name, then `/Bitmaps`): `/Diode5` has no lowercase bitmaps,
 its Encoding maps a-z to the capitals. `/space` is one row of dark pixels on
 every face, as wide as the face's glyph box: the advance less the dark gap
-after a glyph (the font's `/Gap` on `/Diode7` and `/Diode5`, the last of the
-8 cell columns on `/Phosphor` and `/Pinpoint-*`, so 7 there), and a program
+after a glyph (the font's `/Gap` on `/Diode7` and `/Diode5`, on `/Phosphor` and
+`/Pinpoint-*` the last of the 8 cell columns, which every glyph but `underscore`
+leaves dark, so 7 there), and a program
 reading the rows needs no special case for it. Each face has a `/FontName`, the name it
 is registered under; a `pf-variant` copy gets its own.
 

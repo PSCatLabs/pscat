@@ -532,8 +532,10 @@ fn every_face_and_variant_carries_its_registered_font_name() {
 /// monospaced ones, whose rows are 7 wide). The advances are the ones the
 /// faces had before #1492: the row change does not move any text.
 #[test]
-fn the_space_row_is_one_dark_row_as_wide_as_its_advance() {
-    // (file, face, space advance in font pixels, the gap after a glyph)
+fn the_space_row_is_one_dark_row_as_wide_as_its_glyph_box() {
+    // (file, face, space advance in font pixels, the gap after a glyph: the
+    // font's /Gap on a proportional face; on a monospaced face (/Gap 0) the
+    // cell's last column, which the glyph rows leave dark, so 1)
     let cases = [
         ("lib/fonts/phosphor.ps", "Phosphor", 8, 1),
         ("lib/fonts/phosphor.ps", "Phosphor-Scan", 8, 1),

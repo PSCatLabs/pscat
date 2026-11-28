@@ -28,8 +28,8 @@ edges. Three are fixed here, in `lib/fonts/phosphor.ps`, `pinpoint.ps`,
 - **/space.** `[]` on /Phosphor and /Pinpoint-*, `[(..)]` on /Diode7 and
   /Diode5. Now one row of `.` everywhere, as wide as the face's glyph box (the
   advance less the dark gap after a glyph): `[(.......)]` (7: the 8-column
-  cell less its dark last column, the width of almost every row in those
-  files) on the monospaced faces, `[(..)]` unchanged on the Diode faces
+  cell less its last column, which every glyph but `underscore` leaves dark;
+  the width of almost every row in those files) on the monospaced faces, `[(..)]` unchanged on the Diode faces
   (2 + `/Gap` 1 = 3). The prepared glyph is the same (`[8 [] [] []]` before
   and after), so nothing renders differently. 7, not 8: psanim's
   `pkpixel.ps` turns `[]` into one column padded to `/Cell` - 1 = 7 and takes a

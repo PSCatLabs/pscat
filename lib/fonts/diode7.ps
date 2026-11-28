@@ -54,9 +54,10 @@
 %   10 dict begin (lib/fonts/diode7.ps) run ... end
 %
 % /Bitmaps /space is one row of dark pixels as wide as the face's glyph
-% box: the advance less the dark gap after a glyph (/Gap on the
-% proportional faces, the last of the /Cell's 8 columns on the
-% monospaced ones), so a program reading the rows needs no special case.
+% box: the advance less the /Gap after each glyph, so (..), 2 + /Gap 1 =
+% 3. The monospaced faces in phosphor.ps and pinpoint.ps follow the same
+% rule with the cell's dark last column as the gap. A program reading the
+% rows needs no special case for it.
 %
 % Draws nothing on load; runs unchanged in Ghostscript.
 
