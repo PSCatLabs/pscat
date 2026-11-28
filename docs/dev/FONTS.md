@@ -599,8 +599,10 @@ older display library:
   `pixelvariant` calls `pf-variant` by that name from the private dictionary
   it ran the file in: keep its name, its `/New /Base << dials >>` form and
   that place. Every face, and every `pf-variant` copy, carries `/FontName`
-  (its registered name). `/Bitmaps /space` is one row of `.` whose length
-  plus `/Gap` is the advance on every face.
+  (its registered name). `/Bitmaps /space` is one row of `.` as wide as
+  the glyph box (advance less the gap: `(.......)` on the 8-column monospaced
+  faces, `(..)` with `/Gap 1` on the Diode faces); psanim's `pkpixel.ps` pads
+  monospaced columns to 7, so a wider row would widen its space.
 
 All the work is PostScript, so it counts against `--max-steps`,
 `--max-time` and `--max-memory` like any program. `pscat fonts list` now

@@ -52,9 +52,10 @@
 % inside a dictionary of its own:
 %   10 dict begin (lib/fonts/phosphor.ps) run ... end
 %
-% /Bitmaps /space is one row of dark pixels, and its length plus /Gap is
-% the space's advance (/Cell on a monospaced face) on every one of these
-% faces, so a program reading the rows needs no special case for it.
+% /Bitmaps /space is one row of dark pixels as wide as the face's glyph
+% box: the advance less the dark gap after a glyph (/Gap on the
+% proportional faces, the last of the /Cell's 8 columns on the
+% monospaced ones), so a program reading the rows needs no special case.
 %
 % Draws nothing on load; runs unchanged in Ghostscript.
 
@@ -76,7 +77,7 @@
   /Bitmaps 100 dict def
   Bitmaps begin
     /.notdef [] def
-    /space [(........)] def
+    /space [(.......)] def
     /exclam [
       (..##...)
       (..##...)

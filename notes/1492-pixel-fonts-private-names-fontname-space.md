@@ -26,10 +26,15 @@ edges. Three are fixed here, in `lib/fonts/phosphor.ps`, `pinpoint.ps`,
   UTF-8-in-a-byte-font note), so a message about these faces now names them
   instead of `?`.
 - **/space.** `[]` on /Phosphor and /Pinpoint-*, `[(..)]` on /Diode7 and
-  /Diode5. Now one row of `.` everywhere, whose length plus `/Gap` is the
-  space's advance: `[(........)]` (8, the `/Cell`) on the monospaced faces,
-  `[(..)]` unchanged on the Diode faces (2 + Gap 1 = 3). The prepared glyph is
-  the same (`[8 [] [] []]` before and after), so nothing renders differently.
+  /Diode5. Now one row of `.` everywhere, as wide as the face's glyph box (the
+  advance less the dark gap after a glyph): `[(.......)]` (7: the 8-column
+  cell less its dark last column, the width of almost every row in those
+  files) on the monospaced faces, `[(..)]` unchanged on the Diode faces
+  (2 + `/Gap` 1 = 3). The prepared glyph is the same (`[8 [] [] []]` before
+  and after), so nothing renders differently. 7, not 8: psanim's
+  `pkpixel.ps` turns `[]` into one column padded to `/Cell` - 1 = 7 and takes a
+  glyph's width from its first row, so a 7-dot row keeps psanim's space as it
+  was, where an 8-dot row would have widened it by a column.
 
 `/Bitmaps` is otherwise unchanged and the six registered names
 (/Phosphor, /Phosphor-Scan, /Pinpoint-Draft, /Pinpoint-NLQ, /Diode7, /Diode5)

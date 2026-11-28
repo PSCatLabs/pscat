@@ -259,9 +259,10 @@ bottom, `#` lit and `.` dark, for a program that drives a real LED grid or
 writes a frame at grid size. Look a character up through the font's `/Encoding`
 (code, then glyph name, then `/Bitmaps`): `/Diode5` has no lowercase bitmaps,
 its Encoding maps a-z to the capitals. `/space` is one row of dark pixels on
-every face, and its length plus the font's `/Gap` is the space's advance (the
-`/Cell` on the monospaced `/Phosphor` and `/Pinpoint-*`), so a program reading
-the rows needs no special case for it. Each face has a `/FontName`, the name it
+every face, as wide as the face's glyph box: the advance less the dark gap
+after a glyph (the font's `/Gap` on `/Diode7` and `/Diode5`, the last of the
+8 cell columns on `/Phosphor` and `/Pinpoint-*`, so 7 there), and a program
+reading the rows needs no special case for it. Each face has a `/FontName`, the name it
 is registered under; a `pf-variant` copy gets its own.
 
 Loading. Run the file before the first `findfont` of one of its faces: a

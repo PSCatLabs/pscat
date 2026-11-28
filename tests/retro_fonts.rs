@@ -526,22 +526,23 @@ fn every_face_and_variant_carries_its_registered_font_name() {
     }
 }
 
-/// #1492: `/Bitmaps /space` is one row of dark pixels on every face, and its
-/// length plus the face's `/Gap` is the space's advance (a monospaced face
-/// has no gap, so the row is `/Cell` wide). The advances are the ones the
+/// #1492: `/Bitmaps /space` is one row of dark pixels on every face, as wide
+/// as the face's glyph box: the advance less the dark gap after a glyph
+/// (`/Gap` on the proportional faces, the last `/Cell` column on the
+/// monospaced ones, whose rows are 7 wide). The advances are the ones the
 /// faces had before #1492: the row change does not move any text.
 #[test]
 fn the_space_row_is_one_dark_row_as_wide_as_its_advance() {
-    // (file, face, space advance in font pixels)
+    // (file, face, space advance in font pixels, the gap after a glyph)
     let cases = [
-        ("lib/fonts/phosphor.ps", "Phosphor", 8),
-        ("lib/fonts/phosphor.ps", "Phosphor-Scan", 8),
-        ("lib/fonts/pinpoint.ps", "Pinpoint-Draft", 8),
-        ("lib/fonts/pinpoint.ps", "Pinpoint-NLQ", 8),
-        ("lib/fonts/diode7.ps", "Diode7", 3),
-        ("lib/fonts/diode5.ps", "Diode5", 3),
+        ("lib/fonts/phosphor.ps", "Phosphor", 8, 1),
+        ("lib/fonts/phosphor.ps", "Phosphor-Scan", 8, 1),
+        ("lib/fonts/pinpoint.ps", "Pinpoint-Draft", 8, 1),
+        ("lib/fonts/pinpoint.ps", "Pinpoint-NLQ", 8, 1),
+        ("lib/fonts/diode7.ps", "Diode7", 3, 1),
+        ("lib/fonts/diode5.ps", "Diode5", 3, 1),
     ];
-    for (path, face, adv) in cases {
+    for (path, face, adv, gap) in cases {
         let mut it = loaded(path, 10, 10);
         run(
             &mut it,
@@ -550,7 +551,8 @@ fn the_space_row_is_one_dark_row_as_wide_as_its_advance() {
                  /S F /Bitmaps get /space get def
                  S length 1 eq
                  {{ true S 0 get {{ 46 eq and }} forall
-                    S 0 get length F /Gap get add {adv} eq and }} {{ false }} ifelse
+                    S 0 get length {gap} add {adv} eq and
+                    F /Proportional get {{ F /Gap get {gap} eq and }} if }} {{ false }} ifelse
                  F 1 F /FontMatrix get 0 get div scalefont setfont
                  ( ) stringwidth pop {adv} sub abs 1e-6 lt and"
             ),
