@@ -24,7 +24,7 @@ and one of 10 or 12 stops (x = 70, 82 to 88) has j = 6 or 8 and is unchanged.
 
 Now the overlap's flags carry j (the 15th, index 14) and `dkZthin` keeps the whole
 run's own stops (multiples of k from the run's start) inside the tail, plus the
-tail's first and last. Only a run with flag 16 takes the new branch; every
+tail's first and last. Only an overlap run takes the new branch (`dkZthin` tests for dkFover's 15-element flags; no other run has more than 4); every
 other run, and every whole stroke, takes the old one.
 
 Measured, 5 curve families (rising, falling, `/Levels 3`, `/Width 5`, touch
@@ -90,7 +90,8 @@ fix here only covers the overlap's tail.
 
 **Limits of the lattice fix.** A `dkZsplit` half of an overlap run (only after a
 budget split of a chunk) keeps the original `j`, so its second half thins on a stale
-phase: the catch is still a superset, only the knuckle direction is off. And a whole
+phase (so does a piece of a long overlap run that `dkZgroup` chunks): the catch is
+still a superset, only the knuckle direction is off. And a whole
 stroke long enough for `dkZgroup` to chunk thins per chunk (HANDOFF), so the
 alignment matches the whole stroke only for runs that are not chunked.
 
