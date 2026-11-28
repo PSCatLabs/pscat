@@ -189,40 +189,62 @@ fn the_drop_does_what_the_swap_did_to_cases_a_and_b() {
     }
 }
 
-/// The scopes the issue measured: a translucent fill, `rectfill` and a glyph
-/// feed the shadow, as does Multiply even at alpha 1 over a translucent
-/// build-up; each differs after the drop. Strokes and images never feed it.
+/// What the drop changes in later painting. A 64x64 black page with five
+/// faint fills on it, the drop (or not), then one more mark: fills, `rectfill`s
+/// and glyphs that blend differ (Multiply even at alpha 1, and the
+/// anti-aliased edge pixels of an opaque circle, glyph or off-grid
+/// rectangle), and a stroke, an image and an opaque rectangle on whole pixels
+/// do not. Each "does not" leg also checks that the mark changed pixels, so
+/// it is not vacuous.
 #[test]
-fn what_feeds_the_shadow_and_what_does_not() {
+fn what_the_drop_changes_and_what_it_does_not() {
+    let build = format!("{BLACK}{}", FILL.repeat(5));
+    let only_build = render(&build, Way::Keep).0;
     let sweep = |last: &str| {
-        let t = format!("{BLACK}{} @ {last}", FILL.repeat(5));
+        let t = format!("{build} @ {last}");
         let keep = render(&t, Way::Keep).0;
         let dropped = render(&t, Way::Drop).0;
-        differing(&keep, &dropped).0
+        (
+            differing(&keep, &dropped).0,
+            differing(&only_build, &keep).0,
+        )
     };
-    // Fills, rectfill, glyphs: differ.
-    assert_eq!(sweep(FILL), 4096);
+    // Translucent fills, rectfill, glyphs: every pixel they cover differs.
+    assert_eq!(sweep(FILL), (4096, 4096));
     assert_eq!(
         sweep("1 setgray 0.02 setalpha 0 0 moveto 64 0 lineto 64 64 lineto 0 64 lineto fill "),
-        4096
+        (4096, 4096)
     );
-    assert!(sweep(GLYPH) > 0);
-    // Multiply at alpha 1 over the build-up: some pixels differ (measured).
-    let multiply = "0.5 setgray 1 setalpha /Multiply setblendmode 0 0 64 64 rectfill ";
-    assert!(sweep(multiply) > 0);
-    // A stroke and an image write the 8-bit canvas only: no difference.
+    assert!(sweep(GLYPH).0 > 0);
+    // Multiply at alpha 1 over the build-up: some pixels differ.
+    assert!(sweep("0.5 setgray 1 setalpha /Multiply setblendmode 0 0 64 64 rectfill ").0 > 0);
+    // The anti-aliased edge of an opaque fill or glyph goes through the
+    // shadow too: only those pixels differ (measured: 32, 108 and 3).
+    let (edge, painted) = sweep("0 1 0 setrgbcolor 1 setalpha 32 32 20.3 0 360 arc fill ");
+    assert_eq!(edge, 32);
+    assert!(painted > edge);
+    let (edge, _) = sweep(
+        "0 1 0 setrgbcolor 1 setalpha /Helvetica findfont 60 scalefont setfont 4 8 moveto (W) show ",
+    );
+    assert_eq!(edge, 108);
     assert_eq!(
-        sweep("1 setgray 0.02 setalpha 10 setlinewidth 0 32 moveto 64 32 lineto stroke "),
-        0
+        sweep("0 1 0 setrgbcolor 1 setalpha 0.5 0.5 40.25 40.25 rectfill ").0,
+        3
     );
-    assert_eq!(
-        sweep(
-            "gsave 0.02 setalpha 64 64 scale 2 2 8 [2 0 0 -2 0 2] <ff00 00ff> false 1 colorimage grestore "
-        ),
-        0
+    // Whole pixels of an opaque Normal fill: no difference, and it painted.
+    let (diff, painted) = sweep("0 1 0 setrgbcolor 1 setalpha 0 0 40 40 rectfill ");
+    assert_eq!((diff, painted), (0, 1600));
+    // A stroke and an image write the 8-bit canvas only: no difference,
+    // though both painted.
+    let (diff, painted) =
+        sweep("1 setgray 0.02 setalpha 10 setlinewidth 0 32 moveto 64 32 lineto stroke ");
+    assert_eq!(diff, 0);
+    assert!(painted > 0, "the stroke painted");
+    let (diff, painted) = sweep(
+        "gsave 0.02 setalpha 64 64 scale 2 2 8 [2 0 0 -2 0 2] <ff00 00ff> false 1 colorimage grestore ",
     );
-    // An opaque normal fill never differs.
-    assert_eq!(sweep("0 1 0 setrgbcolor 1 setalpha 0 0 40 40 rectfill "), 0);
+    assert_eq!(diff, 0);
+    assert!(painted > 0, "the image painted");
 }
 
 /// 1000 fills of white at alpha 0.002 over black reach 221 in 16 bits, the
@@ -560,6 +582,8 @@ fn in_a_paintproc_under_a_group_the_page_below_is_dropped() {
     assert_eq!(dropped, render(&before, Way::Drop).0);
     assert_eq!(keep, render(&before, Way::Keep).0);
     assert_off_by_a_level(&keep, &dropped);
+    // The swap trick is not refused here either: it reaches the same page.
+    assert_eq!(render(&inside, Way::Swap).0, dropped);
     // A group the PaintProc opens itself is the tile's, not a page group:
     // with no page group the call is still false.
     let own = pattern("<< >> begingroup @ endgroup");

@@ -288,7 +288,8 @@ impl crate::Interp {
     /// as the error. The returned page carries the interpreter's resolution.
     /// Not for use while SVG or PDF output is being recorded: those record
     /// drawing operations, not this raster. Inside a pattern's `PaintProc`
-    /// there is no page to exchange and `page` is handed back. While a
+    /// with no page group open there is no page to exchange and `page` is
+    /// handed back (with one open, the page below it is exchanged). While a
     /// transparency group is open (`begingroup`) the canvas is the page
     /// below the group's layer: the exchange swaps that page, and the
     /// group still composites onto it at `endgroup`.
@@ -296,9 +297,10 @@ impl crate::Interp {
     /// open, and [`innermost_group_serial`](crate::Interp::innermost_group_serial)
     /// which.
     ///
-    /// **The 16-bit fill shadow is dropped.** Translucent `fill`, `rectfill`
-    /// and glyphs composite in 16 bits behind the 8-bit canvas, and a swap
-    /// throws that extra precision away, even when the canvas is swapped out
+    /// **The 16-bit fill shadow is dropped.** Fills and glyphs that blend
+    /// (translucent ones, among others: see
+    /// [`drop_fill_shadow`](Self::drop_fill_shadow)) composite in 16 bits
+    /// behind the 8-bit canvas, and a swap throws that extra precision away, even when the canvas is swapped out
     /// and straight back with no pixel changed. Painting after it rounds from
     /// the 8-bit pixels, which can leave a pixel one level off the same
     /// painting with no swap: five faint fills (white at alpha 0.02 over
@@ -306,7 +308,7 @@ impl crate::Interp {
     /// in a row at every pixel of the page, by one level. The shadow
     /// belongs to the canvas that is exchanged (the page below the outermost
     /// open group, if one is), and a swap that is refused (wrong size, or
-    /// inside a `PaintProc`) leaves it alone. This does not change; a host
+    /// inside a `PaintProc` with no page group open) leaves it alone. This does not change; a host
     /// that wants the shadow gone without swapping calls
     /// [`drop_fill_shadow`](Self::drop_fill_shadow). A swap also cancels the
     /// erase that `showpage` arms, and marks the page painted; the drop does
@@ -336,19 +338,23 @@ impl crate::Interp {
         }
     }
 
-    /// Drop the 16-bit fill shadow of the canvas (#1506): from here, the next
-    /// translucent fill or glyph starts from the canvas's 8-bit pixels, as
-    /// it would on a fresh [`Page`] holding those same pixels. `true` when
+    /// Drop the 16-bit fill shadow of the canvas (#1506): from here, what
+    /// blends with the canvas (the list below) starts from the canvas's 8-bit
+    /// pixels, as it would on a fresh [`Page`] holding those same pixels. `true` when
     /// there was a canvas to act on; `false` inside a pattern's `PaintProc`
     /// with no page group opened before it, where nothing is dropped.
     ///
-    /// **What the shadow is.** `fill`, `rectfill` and glyphs composite in
-    /// 16 bits per channel behind the 8-bit canvas, so a stack of faint
-    /// layers reaches the colour the arithmetic gives instead of stalling
-    /// at 8 bits (1000 fills of white at alpha 0.002 over black reach 221;
-    /// with the shadow dropped before every fill they reach 5). Strokes and
-    /// images write the 8-bit canvas only and never feed it. The shadow is
-    /// internal: no pixel shows it, and it is not part of a [`Page`].
+    /// **What the shadow is.** `fill`, `rectfill` and glyphs that blend with
+    /// the canvas composite in 16 bits per channel behind the 8-bit canvas,
+    /// so a stack of faint layers reaches the colour the arithmetic gives
+    /// (1000 fills of white at alpha 0.002 over black reach 221; with the
+    /// shadow dropped before every fill they reach 5). What blends: translucent
+    /// fills and glyphs, Multiply at any alpha, the anti-aliased edge pixels
+    /// of an opaque fill or glyph, and a transparency group's composite at
+    /// `endgroup`. What does not read it: the pixels an opaque Normal fill
+    /// covers entirely, strokes and images, which write the 8-bit canvas only
+    /// and never feed it. The shadow is internal: no pixel shows it, and it is
+    /// not part of a [`Page`].
     ///
     /// **Why a host calls this.** [`swap_canvas`](Self::swap_canvas) throws
     /// the shadow away, so painting after a swap rounds from the 8-bit
@@ -359,7 +365,8 @@ impl crate::Interp {
     /// differ, instead of swapping out and back for the side effect.
     ///
     /// **A pure effect on the shadow.** No pixel changes, now or at once
-    /// after: only how a *later* translucent fill rounds. Unlike the swap
+    /// after: only how a *later* mark that blends (above) rounds, by up to a
+    /// level. Unlike the swap
     /// trick it does not cancel a `showpage` erase that is armed (the next
     /// mark still starts a fresh page), and it does not mark the page
     /// painted. It costs nothing against the limits (no step or memory is

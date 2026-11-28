@@ -46,8 +46,9 @@
 //!   states are saved now, so a host that runs a caller's procedure can see
 //!   how many levels it left open (or closed), `endgroup`'s truncation
 //!   included.
-//! - **The 16-bit fill shadow.** Translucent fills and glyphs composite in
-//!   16 bits behind the 8-bit canvas, and
+//! - **The 16-bit fill shadow.** Fills and glyphs that blend with the canvas
+//!   (translucent ones, Multiply, the anti-aliased edges of opaque ones, a
+//!   group's composite) composite in 16 bits behind the 8-bit canvas, and
 //!   [`swap_canvas`](crate::Interp::swap_canvas) drops that shadow, so painting
 //!   after a swap rounds from the 8-bit pixels (up to a level off the same
 //!   painting with no swap). [`Interp::drop_fill_shadow`] drops it on purpose,

@@ -336,12 +336,15 @@ progress with no copy. `swap_canvas` exchanges the raster the program paints
 on for another `Page` of the same size, leaving the graphics state alone: a
 host paints part of a picture on a `Page::transparent` layer and composites it
 itself (`Page::premultiplied_rgba8_mut`), or keeps a picture from one run to
-the next. Inside a pattern's `PaintProc` there is no page to exchange, and the
-`Page` comes back as the error.
+the next. Inside a pattern's `PaintProc` with no page group open there is no page to
+exchange, and the `Page` comes back as the error.
 
-**The fill shadow.** Translucent `fill`, `rectfill` and glyphs composite in 16 bits
-behind the 8-bit canvas, so a stack of faint layers reaches the colour the arithmetic
-gives (1000 fills of white at alpha 0.002 over black reach 221). `swap_canvas` throws
+**The fill shadow.** Fills and glyphs that blend with the canvas composite in 16 bits
+behind it, so a stack of faint layers reaches the colour the arithmetic gives (1000
+fills of white at alpha 0.002 over black reach 221). What blends: translucent fills and
+glyphs, Multiply at any alpha, the anti-aliased edge pixels of an opaque fill or glyph,
+and a group's composite at `endgroup`; the pixels an opaque Normal fill covers
+entirely, strokes and images do not read it. `swap_canvas` throws
 that precision away, even swapping out and straight back with no pixel changed: five
 faint fills, a swap, and a sixth fill differ from six fills in a row by one level at
 every pixel. `drop_fill_shadow()` does the same to the shadow and nothing else, so a

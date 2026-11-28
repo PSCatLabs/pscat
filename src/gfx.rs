@@ -5028,7 +5028,8 @@ impl Gfx {
     /// With a transparency group open it is the page below the group's
     /// layer that is exchanged (#1406), so the group still composites
     /// onto the canvas the host handed over. Handed back as the error
-    /// inside a pattern's `PaintProc`, where there is no page to exchange.
+    /// inside a pattern's `PaintProc` with no page group open, where there
+    /// is no page to exchange.
     pub(crate) fn swap_pixmap(&mut self, pixmap: Pixmap) -> Result<Pixmap, Pixmap> {
         let Some((page, deep)) = self.page_slot_mut() else {
             return Err(pixmap);

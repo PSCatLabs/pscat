@@ -35,9 +35,12 @@ by construction:
   freed (`tests/host_fill_shadow_memory_1506.rs`, own binary with the tracking
   allocator).
 
-**What a later fill does** (measured, `what_feeds_the_shadow_and_what_does_not`): a
-translucent `fill`, `rectfill`, a glyph, and Multiply even at alpha 1, differ after the
-drop; strokes, images and an opaque Normal fill never do. 1000 fills of white at 0.002
+**What a later mark does** (measured, `what_the_drop_changes_and_what_it_does_not`): a
+translucent `fill`, `rectfill`, a glyph, Multiply even at alpha 1, and the
+anti-aliased edge pixels of an opaque circle (32 pixels), an opaque glyph (108) and an
+off-grid rectangle (3) differ after the drop; a group's composite at `endgroup` too.
+The pixels an opaque Normal fill covers entirely, strokes and images do not (each leg
+also asserts the mark painted). 1000 fills of white at 0.002
 reach 221 with the shadow; dropped before every fill they reach 5 (not the 128 that
 `deep.rs` says an 8-bit page stalls at: that is a different arrangement).
 

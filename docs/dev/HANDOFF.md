@@ -1744,7 +1744,8 @@ renders eight examples in both and compares block-downsampled output).
   shadow (`page_slot_mut`: the page below the outermost page group; nothing in a
   `PaintProc` with no page group) and touches nothing else, so it must stay a pure
   effect on `Deep`. Carrying the shadow with a `Page` was measured and not done
-  (8 bytes a pixel, 3x a `Page`); the numbers are in the note.
+  (the shadow is 8 bytes a pixel, twice the pixmap, so a `Page` that carried it
+  would be 3x today's); the numbers are in the note.
 
 - **Transcendental math goes through `src/fmath/`, never `f64::sin` and
   friends** (#738). The platform libm rounds differently on macOS, Linux and
