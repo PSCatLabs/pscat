@@ -35,11 +35,28 @@ pub fn install(dict: &mut Dict) {
     op(dict, "token", token);
 }
 
-fn pop_string(it: &mut Interp) -> Result<crate::object::PsString, PsError> {
-    match &it.pop()?.value {
+/// A string an operator reads: a non-string is `typecheck`, then a `noaccess`
+/// one is `invalidaccess`, as in gs (#1362). Check the operands one at a time
+/// in the order gs does (`search` its string first, `anchorsearch` its seek
+/// first), after both are popped, so a short stack is `stackunderflow` first.
+/// The operands are put back by the ledger, and the check comes before any
+/// work is done.
+fn readable_string(obj: &Object) -> Result<crate::object::PsString, PsError> {
+    match &obj.value {
+        Value::String(_) if obj.noaccess => Err(PsError::InvalidAccess),
         Value::String(s) => Ok(s.clone()),
         _ => Err(PsError::Typecheck),
     }
+}
+
+/// `seek` and `s` popped, the string checked first (`search`).
+fn pop_search_operands(
+    it: &mut Interp,
+) -> Result<(crate::object::PsString, crate::object::PsString), PsError> {
+    let seek = it.pop()?;
+    let s = it.pop()?;
+    let s = readable_string(&s)?;
+    Ok((readable_string(&seek)?, s))
 }
 
 /// The first index at which `needle` occurs in `hay`; 0 for an empty
@@ -54,8 +71,7 @@ fn find_bytes(hay: &[u8], needle: &[u8]) -> Option<usize> {
 /// str seek search -> post match pre true | str false. The three results
 /// are views into str, per the PLRM.
 fn search(it: &mut Interp) -> Result<(), PsError> {
-    let seek = pop_string(it)?;
-    let s = pop_string(it)?;
+    let (seek, s) = pop_search_operands(it)?;
     // Borrowed, not copied: the two may be views of one string, which two
     // shared borrows allow. Both end before the result views are made.
     let found = find_bytes(&s.borrow_bytes(), &seek.borrow_bytes());
@@ -79,8 +95,11 @@ fn search(it: &mut Interp) -> Result<(), PsError> {
 
 /// str seek anchorsearch -> post match true | str false.
 fn anchorsearch(it: &mut Interp) -> Result<(), PsError> {
-    let seek = pop_string(it)?;
-    let s = pop_string(it)?;
+    let seek_obj = it.pop()?;
+    let s_obj = it.pop()?;
+    // gs checks the seek string first here, the opposite of `search`.
+    let seek = readable_string(&seek_obj)?;
+    let s = readable_string(&s_obj)?;
     let n = seek.len();
     let matches = n <= s.len() && s.borrow_bytes()[..n] == *seek.borrow_bytes();
     if matches {
@@ -99,6 +118,7 @@ fn anchorsearch(it: &mut Interp) -> Result<(), PsError> {
 fn token(it: &mut Interp) -> Result<(), PsError> {
     let src = it.pop()?;
     let s = match &src.value {
+        Value::String(_) if src.noaccess => return Err(PsError::InvalidAccess),
         Value::String(s) => s.clone(),
         Value::File(f) => {
             match it.scan_token_from_file(f.clone())? {

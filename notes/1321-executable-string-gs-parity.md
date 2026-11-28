@@ -22,7 +22,8 @@ matches; the test runs gs too when it is installed.
    `cvx`/`cvlit` (all probed against gs), `copy` with a `noaccess` string at either end is
    `invalidaccess` before the length check, as in gs (it had cleared the flag on the result), and
    `readonly`/`executeonly` on one are `invalidaccess`.
-   Nothing else reads it: a `noaccess` string still reads and prints as its text (gs prints
+   (#1362 later added `cvs`, `cvrs`, `search`, `anchorsearch` and `token`: see
+   `notes/1362-noaccess-string-operators.md`.) Nothing else reads it: a `noaccess` string still reads and prints as its text (gs prints
    `-string-` and refuses `get`/`getinterval`/`put`; not modelled, as for arrays since #1189).
    `noaccess` on an executable array still only write-protects it; gs also refuses to run it
    (`{7} noaccess exec` is `invalidaccess`).

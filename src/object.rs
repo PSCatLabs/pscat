@@ -311,8 +311,9 @@ pub struct Object {
     /// still enters it and the procedures nested in it, as Ghostscript does.
     pub(crate) packed: bool,
     /// `noaccess` was applied to this string or file reference (#1321):
-    /// executing it raises `invalidaccess`, as in Ghostscript. Nothing else
-    /// reads it (a read of a `noaccess` string still succeeds, see
+    /// executing it raises `invalidaccess`, as in Ghostscript, and so do
+    /// `copy`, `cvs`, `cvrs`, `search`, `anchorsearch` and `token` (#1362).
+    /// Nothing else reads it (the other string reads still succeed, see
     /// `ops/misc.rs`), and only strings and files carry it.
     pub(crate) noaccess: bool,
 }
