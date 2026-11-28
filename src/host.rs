@@ -4,7 +4,7 @@
 //! The rest of the supported API runs a program and reads its pages. This
 //! module is for a host that does more than that: an animation engine that
 //! calls one procedure per frame, an editor that feeds a program live input,
-//! a server that gives programs a few operators of its own. It has ten
+//! a server that gives programs a few operators of its own. It has eleven
 //! parts, all methods on [`Interp`]:
 //!
 //! - **Operators.** [`Interp::register_operator`] adds an operator backed by
@@ -46,6 +46,14 @@
 //!   states are saved now, so a host that runs a caller's procedure can see
 //!   how many levels it left open (or closed), `endgroup`'s truncation
 //!   included.
+//! - **The 16-bit fill shadow.** Translucent fills and glyphs composite in
+//!   16 bits behind the 8-bit canvas, and
+//!   [`swap_canvas`](crate::Interp::swap_canvas) drops that shadow, so painting
+//!   after a swap rounds from the 8-bit pixels (up to a level off the same
+//!   painting with no swap). [`Interp::drop_fill_shadow`] drops it on purpose,
+//!   without the swap: no pixel changes, no limit is charged, and it acts on
+//!   the canvas `swap_canvas` would exchange (the page below the outermost
+//!   open group; nothing inside a `PaintProc` with no page group).
 //!
 //! Like the rest of the crate API, all of it is Experimental
 //! ([`docs/STABILITY.md`](https://github.com/PSCatLabs/pscat/blob/main/docs/STABILITY.md)):

@@ -5044,6 +5044,22 @@ impl Gfx {
         Ok(old)
     }
 
+    /// Drop the 16-bit shadow of the canvas, the one `swap_pixmap`
+    /// exchanges ([`page_slot_mut`](Self::page_slot_mut)), and nothing else
+    /// (#1506): no pixel changes, and unlike `swap_pixmap` an armed
+    /// `showpage` erase stays armed and the page is not marked painted or
+    /// dirty. `false` where there is no page to reach (inside a pattern's
+    /// `PaintProc` with no page group opened before it): nothing is dropped.
+    pub(crate) fn drop_fill_shadow(&mut self) -> bool {
+        match self.page_slot_mut() {
+            Some((_, deep)) => {
+                deep.clear();
+                true
+            }
+            None => false,
+        }
+    }
+
     pub fn erase(&mut self) {
         if self.painting_off() || !self.captures.is_empty() {
             return;

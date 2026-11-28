@@ -339,6 +339,34 @@ itself (`Page::premultiplied_rgba8_mut`), or keeps a picture from one run to
 the next. Inside a pattern's `PaintProc` there is no page to exchange, and the
 `Page` comes back as the error.
 
+**The fill shadow.** Translucent `fill`, `rectfill` and glyphs composite in 16 bits
+behind the 8-bit canvas, so a stack of faint layers reaches the colour the arithmetic
+gives (1000 fills of white at alpha 0.002 over black reach 221). `swap_canvas` throws
+that precision away, even swapping out and straight back with no pixel changed: five
+faint fills, a swap, and a sixth fill differ from six fills in a row by one level at
+every pixel. `drop_fill_shadow()` does the same to the shadow and nothing else, so a
+host whose frames must agree however they were reached (played in order, or sought
+from a checkpoint, a `Page` rebuilt from 8-bit pixels has no shadow) can say "from
+here, painting starts from the 8-bit pixels" without the swap. No pixel changes, no
+limit is charged and the shadow's memory (8 bytes a pixel, twice the canvas) is
+freed. Unlike the swap it leaves an armed `showpage` erase armed and does not make a
+trailing page. With a group open it drops the shadow of the page below the outermost
+group, the canvas `swap_canvas` exchanges, and not the shadows of the groups' layers;
+inside a `PaintProc` with no page group it does nothing and returns `false`
+(`notes/1506-fill-shadow-drop.md`). A host that never calls it sees no change.
+
+```rust
+let mut interp = pscat::Interp::with_page(64, 64).expect("valid page size");
+interp.run_str("0 setgray 0 0 64 64 rectfill 1 setgray 0.02 setalpha")?;
+for _ in 0..5 {
+    interp.run_str("0 0 64 64 rectfill")?;
+}
+let before = interp.canvas_premultiplied_rgba8().to_vec();
+assert!(interp.drop_fill_shadow()); // true: there was a canvas
+assert_eq!(interp.canvas_premultiplied_rgba8(), &before[..]); // no pixel moved
+interp.run_str("0 0 64 64 rectfill")?; // rounds from the 8-bit pixels now
+```
+
 **Files from memory.** `add_virtual_file(name, bytes)` serves a named source to
 the program, so `(components/foo.ps) run`, `(components/foo.ps) (r) file`,
 `readreals` and `status` work with no disk: for WebAssembly, a sandboxed

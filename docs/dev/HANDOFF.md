@@ -1738,6 +1738,13 @@ renders eight examples in both and compares block-downsampled output).
   pixel) would pass a quarter of the cap; fills then blend on the 8-bit
   page. A `--bands` run keeps a shadow only for its own rows. See
   `notes/731-16bit-compositing-shadow.md`.
+  `swap_canvas` clears the shadow (`Gfx::swap_pixmap`); that is pinned and must
+  not change quietly (psanim relies on it, #1506). `Interp::drop_fill_shadow()`
+  (`Gfx::drop_fill_shadow`, `notes/1506-fill-shadow-drop.md`) clears the same
+  shadow (`page_slot_mut`: the page below the outermost page group; nothing in a
+  `PaintProc` with no page group) and touches nothing else, so it must stay a pure
+  effect on `Deep`. Carrying the shadow with a `Page` was measured and not done
+  (8 bytes a pixel, 3x a `Page`); the numbers are in the note.
 
 - **Transcendental math goes through `src/fmath/`, never `f64::sin` and
   friends** (#738). The platform libm rounds differently on macOS, Linux and
