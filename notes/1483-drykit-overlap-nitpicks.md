@@ -27,17 +27,21 @@ run's own stops (multiples of k from the run's start) inside the tail, plus the
 tail's first and last. Only a run with flag 16 takes the new branch; every
 other run, and every whole stroke, takes the old one.
 
-Measured, 6 curve families x 5 end points x 46 cuts (0.30 to 0.75), pieces after
-against pieces before:
+Measured, 5 curve families (rising, falling, `/Levels 3`, `/Width 5`, touch
+returning to a drawn band) x 5 end points x 46 cuts (0.30 to 0.75), pieces
+after against pieces before:
 
-- 100 cuts out of 230 reach the changed code; the rest are byte-identical.
+- 151 of the 1150 cuts reach the changed code and change; the rest are
+  byte-identical (the `/Width 5` family has none that differ; its tail starts on
+  a stop of the whole run's lattice, or the overlap does not fire).
 - The pieces move by at most 22 levels (36 and 51 on the returning-touch curve),
-  on 12 to 68 pixels (153 on two falling cuts).
-- Against the whole stroke the pieces are closer at all but 3 of those cuts: sum of
-  the worst level over the changed cuts 3,000 to 2,850 on the straight rising
-  family up to 407 to 339 (end x = 91); pixels over 32 never go up. The 3 cuts
-  where the worst level rose (33 to 38, 36 to 37, 20 to 28) have fewer pixels over 32
-  or the same: seam noise.
+  on tens of pixels (up to 153 on two falling cuts).
+- Against the whole stroke they get no worse at 148 of those cuts (the sum of the
+  worst level over the changed cuts goes down in every family, for example
+  1,508 to 1,391 on the rising one and 1,747 to 1,691 on the falling one, and
+  pixels over 32 go from 356 to 349 and from 573 to 555). At the 3 cuts where the
+  worst level rose (33 to 38, 36 to 37, 20 to 28) pixels over 32 are fewer or the same:
+  seam noise.
 - The worst single case, curve ending at x = 91, cut 0.50: 46 levels on 1 pixel over
   32, becomes 24 levels and none. Cut 0.52: 34/1 becomes 23/0. This is the pair
   `an_overlap_run_keeps_the_whole_runs_catch` pins (it fails on the old lib with 1
@@ -54,7 +58,7 @@ never add one. So the question is whether an overlap that the straight line lets
 through, but the path does not (a band change a turn further along a tight curve),
 costs anything. Tried: a tight curl (`40 25 2.5 0 540 arc`, 5 pt across under an 8 pt
 stroke, so a band change half a turn on is 5 pt away by the straight line and 7.9
-along the path, against a reach of 5.5) and four hairpins/loops, cut every 0.02:
+along the path, against a reach of 5.5) and four other shapes, cut every 0.02:
 
 | case | cuts where the two tests differ | pixels over 32, straight (kept) | along the path |
 |---|---|---|---|
