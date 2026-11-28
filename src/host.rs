@@ -1526,30 +1526,46 @@ impl Interp {
     /// difference can be negative: a procedure can `grestore` the levels the
     /// host pushed, down to the floors below.
     ///
-    /// What moves it, each pinned by a test:
+    /// What moves it, each rule pinned by a test, with its condition. `d` is
+    /// the depth read just before a `begingroup`.
     ///
     /// - `gsave` adds one, and `grestore` takes one off. `save` does **not**
-    ///   add a level: it records where the stack was and the state, and
-    ///   `restore` goes back to that depth, dropping the levels opened since
-    ///   and closing any group opened since.
-    /// - `grestore` has three floors. With nothing saved since the innermost
-    ///   `save`, it restores that `save`'s state and leaves the depth where
-    ///   it is; inside a transparency group it stops at the group's own level
-    ///   the same way; with neither it comes down to 0 and stays there.
-    /// - `grestoreall` pops to the same floors at once: to the innermost
-    ///   `save`'s depth, or the group's level, or 0.
+    ///   add a level: it records the depth it found (its *record*) and the
+    ///   state.
+    /// - `restore` **only truncates**: the depth becomes the lower of what it
+    ///   is now and the `save`'s record, and every group opened since the
+    ///   `save` is closed. It never raises the depth. Usually the depth is the
+    ///   record's (the levels opened since are dropped), but the record can be
+    ///   higher than the depth when something removed levels beneath it, as
+    ///   closing a group opened before the `save` does
+    ///   (`gsave << >> begingroup save endgroup restore`: the record is 2, the
+    ///   depth after `endgroup` is 1, and it stays 1 after `restore`).
+    ///   `grestoreall` with a `save` live truncates to the record the same
+    ///   way, except that a group opened since the `save` stops it at the
+    ///   group's level and is not closed.
+    /// - `grestore` has floors where it restores a state and pops nothing: the
+    ///   innermost `save`'s record, a group's own level (a group opened since
+    ///   that `save`), and 0; the higher one applies. A record above the
+    ///   current depth (the case above) makes `grestore` pop nothing at all
+    ///   until the depth is past it. `grestoreall` pops to the same floors at
+    ///   once. So `after - before` can be negative.
     /// - `begingroup` takes a `gsave` level of its own, so inside a group the
-    ///   depth is `d + 1` for a `d` read just before it, then `d + 1 + k`
-    ///   after the body's `k` unmatched `gsave`s. `endgroup` truncates the
-    ///   stack to the group's level and pops that too, so afterwards it is `d`
-    ///   again: the group's level and the `k` levels the body left are gone,
-    ///   whether the body balanced its `gsave`s or not. A `grestore` the
-    ///   body did extra stops at the group's level (above), so `endgroup`
-    ///   lands on the `d` it began at, except in a `PaintProc` (below).
-    ///   Whatever else closes a group
-    ///   (`erasepage`, `showpage`, `copypage`, a `restore` past it, the end of
-    ///   the run, an uncaught error, a limit or the interrupt flag) does the
-    ///   same: the depth goes back to the `d` before its `begingroup`.
+    ///   depth is `d + 1`, then `d + 1 + k` after the body's `k` unmatched
+    ///   `gsave`s. `endgroup` truncates the stack to the group's level and
+    ///   pops that too, so afterwards it is `d`: the group's level and the `k`
+    ///   levels the body left are gone, whether the body balanced its `gsave`s
+    ///   or not. A `grestore` the body did extra stops at the group's level,
+    ///   so `endgroup` lands on `d`. **Conditions:** the group is not a
+    ///   `PaintProc`'s own over-restoring (below), and the body did not
+    ///   `restore` a `save` made before the group.
+    /// - A group closed by something other than its `endgroup`: `erasepage`,
+    ///   `showpage`, `copypage`, the end of the run, an uncaught error, a limit
+    ///   or the interrupt flag lands on `d` as `endgroup` does. A group closed
+    ///   by a `restore` (or `grestoreall`) of a `save` made **before** it lands
+    ///   on that `save`'s record, which is at most `d` and lower when
+    ///   levels opened between the `save` and the group:
+    ///   `gsave save gsave << >> begingroup gsave restore` has `d` = 2, 3 in
+    ///   the group, 4 after the `gsave`, and 1 after the `restore`.
     ///   [`open_group_count`](Self::open_group_count) says whether a group is
     ///   open.
     /// - A pattern's `PaintProc` runs one level above the depth the fill
@@ -1569,17 +1585,32 @@ impl Interp {
     ///   and a later release may stop at the level; a host that cannot trust
     ///   its callers' procedures should read the depth again afterwards, not
     ///   assume the landing points above.
-    /// - A caught error (`stopped`) does not unwind: the levels `gsave`d
-    ///   before the error stay, exactly as a group stays open. Nothing here
-    ///   resets the depth between runs either. A program that finishes or
-    ///   fails with `gsave`s open (an uncaught error included) leaves them
-    ///   on the stack, and the next `run_str` starts from that depth, so a
-    ///   host that wants a known depth reads it before running. The one
-    ///   exception is a group open at the end of the run, which is closed
-    ///   (above).
+    /// - A caught error (`stopped`, `stop`) does not unwind the levels
+    ///   `gsave`d in the code between the `stopped` and the error: they stay,
+    ///   exactly as a group stays open. **The exception is a callback the
+    ///   interpreter runs:** an error that escapes a `PaintProc` or a
+    ///   `BuildChar`, even one an outer `stopped` catches, unwinds that
+    ///   callback and removes the levels it opened, so the depth after the
+    ///   catch is the one before the fill or `show` (`gsave << /PatternType 1
+    ///   ... /PaintProc { pop gsave gsave nosuchop } >> matrix makepattern
+    ///   setpattern { 0 0 30 30 rectfill } stopped pop` reads 1 before, 4 in
+    ///   the callback, 1 after). A `stopped` inside the callback is not
+    ///   escaping it: the levels stay until the callback ends. An error that
+    ///   is not caught and ends the run leaves the levels `gsave`d outside any
+    ///   callback on the stack, and nothing resets the depth between runs
+    ///   either: the next `run_str` starts from that depth, so a host that
+    ///   wants a known depth reads it before running. The one exception is a
+    ///   group open at the end of the run, which is closed (above).
     /// - Nothing else moves it: `showpage`, `erasepage`, `initgraphics`,
     ///   `setpagedevice` and `nulldevice` leave the depth as it is (a group
     ///   opened after `nulldevice` takes its level like any other).
+    ///
+    /// **A host that wants "what did this procedure leave"** reads the depth
+    /// before and after and uses the difference, and must not assume the
+    /// procedure balanced anything: a body can leave levels, pop its
+    /// caller's, close a group by `restore`, or die in a callback. The rules
+    /// above say what happens to each case; none of them makes the
+    /// difference independent of what the procedure did.
     ///
     /// A read of the interpreter's state: it costs no steps, memory or time
     /// against the limits, and changes nothing. Between the slices of

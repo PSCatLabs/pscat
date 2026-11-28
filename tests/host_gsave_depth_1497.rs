@@ -193,6 +193,93 @@ fn a_group_closed_another_way_takes_its_levels_with_it() {
     );
 }
 
+/// A group closed by a `restore` of a `save` made before it lands on that
+/// `save`'s record, which is `d` only when no level was opened between the
+/// two (Codex round 1, D1). Depth before the group, inside and after.
+#[test]
+fn restore_past_a_group_lands_on_the_save_record_not_on_d() {
+    // `d` = 2 (a gsave, the save at 1, another gsave); in the group 3; its
+    // body's gsave 4; `restore` goes to the record, 1.
+    assert_eq!(
+        read(
+            "gsave save gsave probe << >> begingroup probe gsave probe restore probe
+             grestoreall probe"
+        ),
+        [2, 3, 4, 1, 0]
+    );
+    // The save at depth 0, a gsave, then the group: d = 1, restore to 0.
+    assert_eq!(
+        read("save gsave probe << >> begingroup gsave probe restore probe"),
+        [1, 3, 0]
+    );
+    // Two groups opened since the save are both closed by it.
+    assert_eq!(
+        read(
+            "gsave save gsave << >> begingroup gsave << >> begingroup probe
+             restore probe"
+        ),
+        [5, 1]
+    );
+    // With nothing between the save and the group, it is `d` (the record).
+    assert_eq!(
+        read("gsave probe save << >> begingroup gsave probe restore probe"),
+        [1, 3, 1]
+    );
+    // `grestoreall` with a group opened since the save stops at the group's
+    // level and does not close it; the group's own `endgroup` and the
+    // `restore` then follow the rules above.
+    assert_eq!(
+        read(
+            "gsave save gsave << >> begingroup gsave gsave probe grestoreall probe
+             endgroup probe restore probe"
+        ),
+        [5, 3, 2, 1]
+    );
+}
+
+/// A `restore` and a `grestoreall` only truncate: with a `save` made inside
+/// a group that is closed (its levels go from beneath the record), the record
+/// is above the depth and neither raises it (Codex round 1, D2). `grestore`
+/// pops nothing until the depth is above the record.
+#[test]
+fn a_record_above_the_depth_is_never_raised_to() {
+    // The record is 2; `endgroup` leaves 1; `restore` leaves 1.
+    assert_eq!(
+        read("gsave << >> begingroup probe save probe endgroup probe restore probe"),
+        [2, 2, 1, 1]
+    );
+    // `grestoreall` in place of `restore`: 1 as well.
+    assert_eq!(
+        read("gsave << >> begingroup save probe endgroup probe grestoreall probe"),
+        [2, 1, 1]
+    );
+    // `grestore` pops nothing while the depth is at or below the record,
+    // and pops once it is above it.
+    assert_eq!(
+        read(
+            "gsave << >> begingroup save endgroup probe gsave gsave probe
+             grestore probe grestore probe grestore probe restore probe"
+        ),
+        [1, 3, 2, 2, 2, 2]
+    );
+    // The floors with a `save` inside a group (its record) and before one
+    // (the group's level): the higher applies.
+    assert_eq!(
+        read(
+            "gsave << >> begingroup gsave save gsave gsave probe grestore grestore
+             grestore probe endgroup probe"
+        ),
+        [5, 3, 1]
+    );
+    assert_eq!(
+        read(
+            "save gsave << >> begingroup gsave gsave probe grestore grestore grestore
+             grestore probe endgroup probe restore probe"
+        ),
+        [4, 2, 1, 0]
+    );
+}
+
 /// Nothing else moves the depth: not the page operators, `initgraphics`,
 /// `setpagedevice`.
 #[test]
@@ -241,6 +328,57 @@ fn a_caught_error_leaves_the_levels_where_they_are() {
         ),
         [4, 1]
     );
+}
+
+/// An error that escapes a callback the interpreter runs (a `PaintProc`, a
+/// `BuildChar`) unwinds that callback and removes its levels, even when an
+/// outer `stopped` catches it (Codex round 1, D3). Depth before the fill,
+/// inside the callback and after the catch.
+#[test]
+fn an_error_escaping_a_callback_removes_the_callbacks_levels() {
+    // Codex's program: 1, then 2 on entry and 4 after two gsaves, then 1.
+    let p = pattern("probe gsave gsave probe nosuchop");
+    assert_eq!(
+        read(&format!(
+            "gsave probe {p} setpattern {{ 0 0 30 30 rectfill }} stopped pop probe"
+        )),
+        [1, 2, 4, 1]
+    );
+    // The same for a BuildChar.
+    let t3 = TYPE3.replace("BODY", "probe gsave gsave probe nosuchop");
+    assert_eq!(
+        read(&format!(
+            "{t3} gsave probe {{ 5 5 moveto (A) show }} stopped pop probe"
+        )),
+        [1, 2, 4, 1]
+    );
+    // Under a page group: the group stays open, the depth is what it was.
+    let p = pattern("gsave gsave nosuchop");
+    assert_eq!(
+        read(&format!(
+            "gsave << >> begingroup probe {p} setpattern {{ 0 0 30 30 rectfill }} stopped
+             pop probe endgroup probe"
+        )),
+        [2, 2, 1]
+    );
+    // A `stopped` inside the callback is not an escape: its levels stay until
+    // the callback ends.
+    let p = pattern("probe { gsave gsave nosuchop } stopped pop probe");
+    assert_eq!(
+        read(&format!(
+            "gsave probe {p} setpattern 0 0 30 30 rectfill probe"
+        )),
+        [1, 2, 4, 1]
+    );
+    // Uncaught: the run ends with the levels outside the callback.
+    let (mut it, log) = interp(40);
+    let p = pattern("gsave gsave nosuchop");
+    let e = it.run_str(&format!(
+        "gsave gsave probe {p} setpattern 0 0 30 30 rectfill probe"
+    ));
+    assert_eq!(e.map_err(|e| e.name()), Err("undefined"));
+    assert_eq!(log.borrow().as_slice(), [2]);
+    assert_eq!(it.gsave_depth(), 2);
 }
 
 /// An uncaught error ends the run, and the interpreter does not unwind the

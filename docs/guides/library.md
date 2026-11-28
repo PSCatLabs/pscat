@@ -482,18 +482,36 @@ assert_eq!(interp.open_group_count(), 0); // the end of the run closed it
 ```
 
 `gsave_depth()` is how many `gsave`s are open now (0 on a fresh interpreter), so a
-host that runs a caller's procedure reads it before and after and knows what the
-procedure left. `save` does not add a level. `grestore` and `grestoreall` stop at
-the innermost `save`'s depth or a group's own level, else at 0, so a difference can
-be negative. `begingroup` takes one level of its own, and `endgroup` truncates the
-stack to where the group began: with `d` read before `begingroup`, the depth is
-`d + 1` in the body and `d + 1 + k` after the body's `k` unmatched `gsave`s, and `d`
-again after `endgroup`, so a body that left `gsave`s open loses them there (whatever
-else closes the group does the same). A `PaintProc` or a Type 3 `BuildChar` runs one
-level up and drops what it left open when it ends (but today one that `grestore`s more than
-it `gsave`d pops its caller's levels, which the other landing points do not allow for). A caught error does not unwind
-the stack, and neither does the end of a run or an uncaught error: the next run
-starts from that depth. A read, free against the limits (`notes/1497-gsave-depth.md`).
+host that runs a caller's procedure reads it before and after and takes the
+difference. Do not assume the procedure balanced anything. The rules, each with its
+condition (`d` is the depth read just before a `begingroup`):
+
+- `save` adds no level; it records the depth it found. `restore` and `grestoreall`
+  only truncate: the depth becomes the lower of what it is and that record, so a
+  record left above the depth (a `save` made inside a group that then ended) is never
+  raised to. `restore` closes every group opened since the `save`; `grestoreall` is
+  stopped by one at its level instead.
+- `grestore` stops (restores the state, pops nothing) at the innermost `save`'s record
+  or a group's own level, whichever is higher, else at 0, so a difference can be
+  negative.
+- `begingroup` takes a level of its own: the depth is `d + 1` in the body and
+  `d + 1 + k` after the body's `k` unmatched `gsave`s, and `d` after `endgroup`, so a
+  body that left `gsave`s open loses them there. `erasepage`, `showpage`, `copypage`,
+  the end of a run, an uncaught error, a limit and the interrupt flag land on `d` too.
+  A `restore` of a `save` made before the group lands on that `save`'s record
+  instead, which is lower than `d` when levels were opened between the two
+  (`gsave save gsave << >> begingroup gsave restore`: `d` is 2, the depth after is 1).
+- A `PaintProc` or a Type 3 `BuildChar` runs one level up and drops what it left open
+  when it ends. An error that escapes one, even one an outer `stopped` catches,
+  unwinds it and removes its levels, so the depth after the catch is the one before
+  the fill or `show`. Today one that `grestore`s more than it `gsave`d pops its
+  caller's levels (below a page group too), which the landing points above do not
+  allow for.
+- Any other caught error (`stopped`) does not unwind the levels `gsave`d since the
+  `stopped`. Neither does the end of a run or an uncaught error: the next run starts
+  from that depth (a group open at the end is closed).
+
+A read, free against the limits (`notes/1497-gsave-depth.md`).
 
 ```rust
 let mut interp = pscat::Interp::with_page(100, 100).expect("valid page size");
