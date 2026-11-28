@@ -36,8 +36,7 @@ fn counts(log: &RefCell<Vec<Reading>>) -> Vec<usize> {
 fn read(src: &str) -> Vec<Reading> {
     let (mut it, log) = interp(40);
     it.run_str(src).expect("runs");
-    let out = log.borrow().clone();
-    out
+    log.take()
 }
 
 #[test]
