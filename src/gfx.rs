@@ -335,6 +335,12 @@ impl PsPath {
         self.segs.is_empty()
     }
 
+    /// The bytes a copy of the path takes (a `gsave` copies it): what an
+    /// operator that saves the state asks the memory limit about first.
+    pub(crate) fn copy_bytes(&self) -> usize {
+        self.segs.len().saturating_mul(std::mem::size_of::<Seg>())
+    }
+
     /// True when the path has a line, curve or `closepath`, not just
     /// `moveto`s: a lone `moveto` bounds no region.
     pub(crate) fn has_drawing_segment(&self) -> bool {

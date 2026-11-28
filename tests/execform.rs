@@ -590,6 +590,56 @@ const CASES: &[(&str, &str, &str)] = &[
         r#"/fa << /FormType 1 /BBox [0 0 10 10] /Matrix [1 0 0 1 0 0] /PaintProc {pop} >> /Form defineresource pop /fb /fa /Form findresource /Form defineresource pop /fb /Form findresource /fa /Form findresource eq b"#,
         "true",
     ),
+    (
+        "a save left open inside",
+        r#"<< /FormType 1 /BBox [0 0 10 10] /Matrix [1 0 0 1 0 0] /PaintProc {pop save pop} >> execform"#,
+        "",
+    ),
+    (
+        "a save and restore inside",
+        r#"<< /FormType 1 /BBox [0 0 10 10] /Matrix [1 0 0 1 0 0] /PaintProc {pop save restore} >> execform"#,
+        "",
+    ),
+    (
+        "a restore of an outer save made before the form",
+        r#"save /sv exch def /f9 << /FormType 1 /BBox [0 0 10 10] /Matrix [1 0 0 1 0 0] /PaintProc {pop} >> def f9 /Matrix get pop sv restore"#,
+        "",
+    ),
+    (
+        "execform inside a save",
+        r#"save << /FormType 1 /BBox [0 0 10 10] /Matrix [1 0 0 1 0 0] /PaintProc {pop} >> execform restore"#,
+        "",
+    ),
+    (
+        "execform inside a save restores the /Implementation key",
+        r#"/ff << /FormType 1 /BBox [0 0 10 10] /Matrix [1 0 0 1 0 0] /PaintProc {pop} >> def save ff execform restore ff /Implementation known b"#,
+        "false",
+    ),
+    (
+        "execform outside a save keeps the /Implementation key",
+        r#"/fg << /FormType 1 /BBox [0 0 10 10] /Matrix [1 0 0 1 0 0] /PaintProc {pop} >> def fg execform fg /Implementation known b"#,
+        "true",
+    ),
+    (
+        "a PaintProc that runs a form",
+        r#"/in << /FormType 1 /BBox [0 0 10 10] /Matrix [1 0 0 1 0 0] /PaintProc {pop} >> def << /FormType 1 /BBox [0 0 10 10] /Matrix [1 0 0 1 0 0] /PaintProc {pop in execform} >> execform"#,
+        "",
+    ),
+    (
+        "a PaintProc that runs a form and leaves its own",
+        r#"7 << /FormType 1 /BBox [0 0 10 10] /Matrix [1 0 0 1 0 0] /PaintProc {pop in execform 9} >> execform"#,
+        "7",
+    ),
+    (
+        "a PaintProc that runs a form that fails",
+        r#"/in << /FormType 1 /BBox [0 0 10 10] /Matrix [1] /PaintProc {pop} >> def 7 << /FormType 1 /BBox [0 0 10 10] /Matrix [1 0 0 1 0 0] /PaintProc {pop in execform} >> execform"#,
+        "!rangecheck 2",
+    ),
+    (
+        "a PaintProc that catches a failing form",
+        r#"/in << /FormType 1 /BBox [0 0 10 10] /Matrix [1] /PaintProc {pop} >> def 7 << /FormType 1 /BBox [0 0 10 10] /Matrix [1 0 0 1 0 0] /PaintProc {pop {in execform} stopped pop} >> execform"#,
+        "7",
+    ),
 ];
 
 /// Plain PostScript, valid in pscat and in gs.

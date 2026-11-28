@@ -1110,6 +1110,10 @@ fn execform(it: &mut Interp) -> Result<(), PsError> {
     // Refused before the `gsave` and the clip mask it will make.
     it.form_room()?;
     it.check_form_clip()?;
+    // The `gsave` copies the current path.
+    let copy = it.gfx.state().path.copy_bytes();
+    it.check_alloc(copy)?;
+    it.poll_limits((copy / 16384) as u64)?;
     it.gfx.gsave();
     match form_setup(it, d, below) {
         Ok(paintproc) => it.begin_form(top, paintproc),
