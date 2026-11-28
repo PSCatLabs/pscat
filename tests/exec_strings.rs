@@ -244,6 +244,41 @@ fn a_noaccess_string_is_refused_by_cvs_cvrs_search_anchorsearch_and_token() {
     check(&cases);
 }
 
+/// The order gs checks `search` and `anchorsearch` operands in (#1362,
+/// Codex round 1): a short stack is `stackunderflow`, and each operand is
+/// then checked for its type and its access in turn. `search` takes its
+/// string first, `anchorsearch` its seek first, so the same two operands can
+/// be `typecheck` for one and `invalidaccess` for the other.
+#[test]
+fn search_and_anchorsearch_check_their_operands_in_gs_order() {
+    let cases: Vec<(String, &str)> = [
+        // One operand: underflow, whatever it is.
+        ("(abc) noaccess search", "/stackunderflow\n1\n"),
+        ("(abc) noaccess anchorsearch", "/stackunderflow\n1\n"),
+        ("1 search", "/stackunderflow\n1\n"),
+        ("1 anchorsearch", "/stackunderflow\n1\n"),
+        // A noaccess seek with a non-string target.
+        ("1 (abc) noaccess search", "/typecheck\n2\n"),
+        ("1 (abc) noaccess anchorsearch", "/invalidaccess\n2\n"),
+        // A noaccess target with a non-string seek.
+        ("(abc) noaccess 1 search", "/invalidaccess\n2\n"),
+        ("(abc) noaccess 1 anchorsearch", "/typecheck\n2\n"),
+        ("1 (abc) noaccess 1 search", "/invalidaccess\n3\n"),
+        // Neither string noaccess, and both.
+        ("1 1 search", "/typecheck\n2\n"),
+        ("1 1 anchorsearch", "/typecheck\n2\n"),
+        ("(a) noaccess (a) noaccess search", "/invalidaccess\n2\n"),
+        (
+            "(a) noaccess (a) noaccess anchorsearch",
+            "/invalidaccess\n2\n",
+        ),
+    ]
+    .into_iter()
+    .map(|(p, w)| (stopped(p), w))
+    .collect();
+    check(&cases);
+}
+
 #[test]
 fn a_noaccess_executable_file_raises_invalidaccess() {
     let root = common::scratch_dir("exec-strings-noaccess-file");
