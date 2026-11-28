@@ -44,6 +44,10 @@ pub fn install(dict: &mut Dict) {
     op(dict, "vmstatus", vmstatus);
     op(dict, "currentglobal", currentglobal);
     op(dict, "setglobal", setglobal);
+    // The PLRM's names for the same two operations (#1270); gs defines
+    // `currentshared` and `setshared` as `currentglobal` and `setglobal`.
+    op(dict, "currentshared", currentglobal);
+    op(dict, "setshared", setglobal);
     op(dict, "gcheck", gcheck);
     op(dict, "scheck", scheck);
     op(dict, "internaldict", internaldict);

@@ -263,23 +263,23 @@ fn the_errors_are_the_ones_gs_raises() {
 /// pscat only. gs's `statusdict` holds 87 printer-control entries
 /// (`product`, `setpapertray`, `lettertray`, ...), its `serverdict` six
 /// (`exitserver`, `execjob`, ...), and `1183615869 internaldict` four. pscat
-/// defines none of them: a probe finds the dictionary, `known` says no to a
-/// printer name, and `exitserver` stays #1270's.
+/// defines none of them but `exitserver` (#1270, `tests/params.rs`): a probe
+/// finds the dictionary, and `known` says no to a printer name.
 #[test]
 fn deviation_the_dictionaries_start_empty() {
-    for src in [
-        "statusdict length",
-        "serverdict length",
-        "1183615869 internaldict length",
-    ] {
+    for src in ["statusdict length", "1183615869 internaldict length"] {
         assert_eq!(stack(src), s(&["0"]), "{src}");
     }
     assert_eq!(
         stack(
             "statusdict /setpapertray known statusdict /product known statusdict /lettertray known \
-             serverdict /exitserver known"
+             serverdict /execjob known"
         ),
         s(&["false", "false", "false", "false"])
+    );
+    assert_eq!(
+        stack("serverdict length serverdict /exitserver known"),
+        s(&["1", "true"])
     );
 }
 

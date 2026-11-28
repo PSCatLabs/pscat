@@ -704,6 +704,29 @@ The objects live in the `UserObjects` array in `userdict`, which grows as
 needed. An index over 65535 is `rangecheck`, an index never defined holds
 `null`, and the error names and growth are those of Ghostscript.
 
+## Parameters, caches and jobs
+
+A prolog written for a printer often sets parameters before it draws. These
+all run, as Ghostscript runs them, with the cheapest honest meaning:
+
+```postscript
+<< /JobName (poster) /MaxFormItem 50000 >> setuserparams
+currentuserparams /JobName get =        % (poster)
+10000 setcachelimit cachestatus 7 array astore ==   % [0 1000000 0 200 0 5000 10000]
+0.5 setsmoothness true setoverprint     % stored, read back, kept by gsave
+```
+
+`setuserparams`/`currentuserparams` and `setsystemparams`/`currentsystemparams`
+store and read back the PLRM parameters that mean something here (cache sizes,
+`JobName`, `VMThreshold`, ...); a bad value is `typecheck` or `rangecheck` and
+changes nothing. User parameters follow `save` and `restore`. A parameter that
+would change a limit or reach outside the sandbox (`MaxOpStack`, the file
+permission arrays, a password, `setdevparams` on `%os%`) is `invalidaccess`.
+Nothing is cached, overprinted or smoothed: `cachestatus` reports an empty
+cache, overprint is a flag, and `startjob` always answers `false` (there is
+no job server to leave). `shareddict`, `setshared` and `currentshared` are
+`globaldict`, `setglobal` and `currentglobal`.
+
 ## Where next
 
 - [Handwriting](handwriting.md): turn a string into a handwriting-style PNG.

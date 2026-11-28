@@ -1876,6 +1876,17 @@ pub struct GraphicsState {
     /// `tests/strokepath.rs` already assumes for gs with it off.
     /// `initgraphics` leaves it alone, as in gs.
     pub stroke_adjust: bool,
+    /// `setoverprint` flag (#1270). Stored and read back only: pscat paints
+    /// no separations, so nothing overprints. Part of the state `gsave`,
+    /// `grestore` and gstates carry; `initgraphics` leaves it alone, as gs
+    /// does (only `grestore` or `grestoreall` back to the initial state
+    /// clears it).
+    pub overprint: bool,
+    /// `setsmoothness` value (#1270), 0.0..=1.0 (the operand is clamped),
+    /// initially 0.02 as in gs 10.07.1. Stored and read back only: the
+    /// rasteriser does not shade by it. `initgraphics` (so `showpage` and
+    /// `setpagedevice` too) resets it.
+    pub smoothness: f32,
     /// Fill/stroke alpha, 0.0..1.0 — `setalpha`/`currentalpha`, the
     /// public contract issue #47 landed on top of issue #46's
     /// watercolor spike (`docs/dev/design/WATERCOLOR.md`). A pscat extension, not
@@ -5622,6 +5633,7 @@ impl Gfx {
         let font = self.state.font.take();
         let clip_stack = std::mem::take(&mut self.state.clip_stack);
         let stroke_adjust = self.state.stroke_adjust;
+        let overprint = self.state.overprint;
         // The device is not part of what initgraphics resets (#739): under
         // `nulldevice` the default matrix is identity and stays so.
         let null_device = self.state.null_device;
@@ -5629,6 +5641,7 @@ impl Gfx {
             font,
             clip_stack,
             stroke_adjust,
+            overprint,
             null_device,
             ..Self::initial_state(self.base_ctm(), self.device.clone())
         };
@@ -5655,6 +5668,8 @@ impl Gfx {
             cmyk: None,
             spot: 0.0,
             stroke_adjust: true,
+            overprint: false,
+            smoothness: 0.02,
             alpha: 1.0,
             blend: BlendMode::Normal,
             colorspace: ColorSpace::Gray,

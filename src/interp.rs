@@ -35,7 +35,7 @@ use crate::ops;
 /// Generous enough for any sane program (procedure calls in tail position
 /// don't consume frames at all), small enough that runaway recursion is an
 /// error rather than unbounded memory growth.
-const EXEC_STACK_LIMIT: usize = 10_000;
+pub(crate) const EXEC_STACK_LIMIT: usize = 10_000;
 
 /// Nesting cap for `{ { { ... } } }` at scan time; the scanner recurses per
 /// nesting level, so this bounds Rust stack use on malicious input.
@@ -205,6 +205,14 @@ impl PlrmDicts {
         ] {
             system.put(name.into(), Object::lit(Value::Dict(dict.clone())));
         }
+        // The one thing gs keeps in `serverdict` that pscat defines (#1270).
+        self.serverdict.borrow_mut().put(
+            "exitserver".into(),
+            Object::exec(Value::Operator(crate::object::Operator {
+                name: "exitserver",
+                func: crate::ops::params::exitserver,
+            })),
+        );
     }
 
     fn all(&self) -> impl Iterator<Item = &Rc<RefCell<Dict>>> {
@@ -487,6 +495,9 @@ struct SaveRecord {
     gfx_state: Box<GraphicsState>,
     /// `setobjectformat` is VM state: `restore` brings the old value back.
     object_format: u8,
+    /// The user parameters (#1270) are local VM in gs: `restore` brings the
+    /// saved set back. Shared with the live set until the first write.
+    user_params: Rc<Vec<crate::ops::params::PVal>>,
 }
 
 /// A PostScript interpreter with its own page, stacks and virtual memory.
@@ -543,6 +554,8 @@ pub struct Interp {
     save_stack: Vec<SaveRecord>,
     /// `setglobal`'s allocation mode and the modes `save` recorded (#1146).
     pub(crate) vm_mode: crate::ops::vm::VmMode,
+    /// User and system parameters (#1270).
+    pub(crate) params: crate::ops::params::ParamState,
     /// `globaldict` (#1159): the dictionary that stands in for global VM.
     /// Always on the dictionary stack, under userdict; `restore` never rolls it back.
     pub(crate) globaldict: Rc<RefCell<Dict>>,
@@ -968,6 +981,12 @@ impl Interp {
             "globaldict".into(),
             Object::lit(Value::Dict(globaldict.clone())),
         );
+        // `shareddict` is the same dictionary under its PLRM name (#1270):
+        // gs defines it as `globaldict`, `eq` and all.
+        system.borrow_mut().put(
+            "shareddict".into(),
+            Object::lit(Value::Dict(globaldict.clone())),
+        );
         let plrm_dicts = PlrmDicts::new();
         plrm_dicts.install(&mut system.borrow_mut());
         let source_lines: Box<RefCell<crate::srcpos::BodyLines>> = Box::default();
@@ -986,6 +1005,7 @@ impl Interp {
             journal: Vec::new(),
             save_stack: Vec::new(),
             vm_mode: Default::default(),
+            params: Default::default(),
             globaldict,
             plrm_dicts,
             quit_requested: false,
@@ -1458,6 +1478,12 @@ impl Interp {
             .saturating_add(groups);
         self.steps_used = self.steps_used.saturating_add(steps);
         self.decode_budget.set_probe(self.limit_probe());
+    }
+
+    /// Whether any directory was allowed for writing (`set_write_roots`):
+    /// `(path) (w) file` can succeed only then.
+    pub(crate) fn can_write_files(&self) -> bool {
+        !self.write_roots.is_empty()
     }
 
     /// The permanent systemdict.
@@ -4719,6 +4745,7 @@ impl Interp {
             gfx_depth,
             gfx_state,
             object_format: self.object_format,
+            user_params: self.params.user.clone(),
         });
         Object::lit(Value::Save(handle))
     }
@@ -4755,6 +4782,7 @@ impl Interp {
             }
         }
         self.object_format = rec.object_format;
+        self.params.user = rec.user_params;
         // grestoreall to the save point, then drop the saved state —
         // pinned against gs (`save gsave gsave 5 setlinewidth restore`).
         self.gfx
