@@ -39,12 +39,26 @@ nothing, so a hundred marks need no more room than one. A pen-space stroke
 after it writes a copy of its own, which is not looked at (a follow-up).
 
 **The encoder's bound was too low** (`png_encode_bytes`). #1475 held the heap
-against 8 bytes a pixel for the encoder's copy and output. Measured on images of
-independent random colours, which deflate barely shrink (3.4 bytes a pixel of
-output), at eleven sizes from 300 to 2000 pixels a side, `encode_png` peaked
-from 9.1 to 16.2 bytes a pixel past its layer, by where the output vector's
-doubling fell (the copy of the pixels, 4, and the old and new buffers together).
-The worst case is 4 + 3 x 4.1 = 16.3; both users now hold 20 a pixel.
+against 8 bytes a pixel for the encoder's copy and output. The png crate
+(0.18) deflates the whole image into one vector and then copies it, in chunks,
+into the output vector, so two vectors of the compressed size are alive and the
+second is growing by doubling; with tiny-skia's clone of the pixels the peak is
+4 + 5 z bytes a pixel for z bytes of compressed output a pixel. A layer is
+opaque inside its shading, so z is its entropy: 3.4 measured for independent
+random colours (alpha and filter bytes included), 3.1 at most in a shading.
+Measured at eleven sizes from 300 to 2000 pixels a side, `encode_png` peaked
+from 9.1 to 16.2 bytes a pixel, by where the doubling fell; the bound is 19.5
+and both users now hold 20 a pixel.
+
+**What it costs.** A capped SVG run now needs about 24 bytes a pixel of headroom
+(the 4 of the layer and the 20) to `makepattern` a Type 1 or mesh shading on a
+canvas, and to make a foreign use's image of one. `--max-memory` is a cap on a
+whole process, so a cap near the heap an SVG run really takes refuses a
+`makepattern` it would have finished. One test had to change for it:
+`a_foreign_use_image_answers_to_the_memory_limit` (tests/patterns.rs) made a
+page-sized pattern on the page at an 11 MiB cap, which `makepattern` now refuses
+before the foreign use it was written to test; it makes its pattern in a 100 pt
+tile (a small canvas) and uses it on the 1000 pt page instead.
 
 **Tests.** `tests/pattern_use_image_memory.rs` (one test, its binary: the cap
 counts the process): ladders of caps on a 2000 pt cell (TilingType 1, and 2 with

@@ -185,14 +185,19 @@ const SVG_STOP_BYTES: usize = 256;
 const PNG_ENCODE_UNITS: u64 = 32;
 
 /// The heap `encode_png` takes beyond its layer for a `px`-pixel image, at
-/// most, plus the encoder's fixed state (#1368, #1477): its copy of the
-/// pixels (4 bytes a pixel) and its output, which a vector grows by doubling,
-/// so the old and the new buffer are alive together. Measured on images of
-/// independent random colours, which deflate barely shrinks (3.4 bytes of
-/// output a pixel), at eleven sizes from 300 to 2000 pixels a side, the peak
-/// ran from 9.1 to 16.2 bytes a pixel with where the doubling fell. The
-/// worst case is the copy and three times an output of 4.1 bytes a pixel
-/// (incompressible RGBA, and the filter byte): 16.3; 20 leaves room.
+/// most, plus the encoder's fixed state (#1368, #1477). tiny-skia clones the
+/// pixmap to demultiply it (4 bytes a pixel); the png crate then deflates the
+/// whole image into one vector (`zlib_encoded`) and only afterwards copies it
+/// in chunks into the output vector, so at the peak both are alive and the
+/// output is growing by doubling (the old and the new buffer together): the
+/// clone, a vector of up to twice the compressed size `z`, and a growing one of
+/// up to three times: 4 + 5 z bytes a pixel. A layer's colours are opaque
+/// inside the shading, so `z` is its entropy, 3 bytes a pixel at the most (an
+/// image of independent random colours: 3.4 measured, alpha and the filter
+/// bytes included; the BBox mask's edges compress). Measured at eleven sizes
+/// from 300 to 2000 pixels a side, the peak ran from 9.1 to 16.2 bytes a
+/// pixel with where the doubling fell; the bound is 4 + 5 x 3.1 = 19.5,
+/// and 20 holds it.
 fn png_encode_bytes(px: usize) -> usize {
     px.saturating_mul(20).saturating_add(4096)
 }
