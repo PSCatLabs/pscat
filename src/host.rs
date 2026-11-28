@@ -4,7 +4,7 @@
 //! The rest of the supported API runs a program and reads its pages. This
 //! module is for a host that does more than that: an animation engine that
 //! calls one procedure per frame, an editor that feeds a program live input,
-//! a server that gives programs a few operators of its own. It has nine
+//! a server that gives programs a few operators of its own. It has ten
 //! parts, all methods on [`Interp`]:
 //!
 //! - **Operators.** [`Interp::register_operator`] adds an operator backed by
@@ -42,6 +42,10 @@
 //!   that composes its own layers with
 //!   [`swap_canvas`](crate::Interp::swap_canvas) can tell when the canvas is
 //!   not the page, and whether it is still the same group.
+//! - **The `gsave` depth.** [`Interp::gsave_depth`] reads how many graphics
+//!   states are saved now, so a host that runs a caller's procedure can see
+//!   how many levels it left open (or closed), `endgroup`'s truncation
+//!   included.
 //!
 //! Like the rest of the crate API, all of it is Experimental
 //! ([`docs/STABILITY.md`](https://github.com/PSCatLabs/pscat/blob/main/docs/STABILITY.md)):
@@ -1511,5 +1515,129 @@ impl Interp {
     /// ```
     pub fn innermost_group_serial(&self) -> Option<u64> {
         self.gfx().innermost_page_group_serial()
+    }
+
+    /// How many graphics states are saved on the `gsave` stack now (#1497):
+    /// the number of `gsave`s not yet matched by a `grestore`, as the
+    /// interpreter itself counts them. A fresh interpreter reads 0, and a
+    /// `gsave` makes it 1. It is the one stack the whole program shares, so
+    /// a host that runs a caller's procedure and wants to know what the
+    /// procedure left behind reads it before and after and subtracts. The
+    /// difference can be negative: a procedure can `grestore` the levels the
+    /// host pushed, down to the floors below.
+    ///
+    /// What moves it, each rule pinned by a test, with its condition. `d` is
+    /// the depth read just before a `begingroup`.
+    ///
+    /// - `gsave` adds one, and `grestore` takes one off. `save` does **not**
+    ///   add a level: it records the depth it found (its *record*) and the
+    ///   state.
+    /// - `restore` **only truncates**: the depth becomes the lower of what it
+    ///   is now and the `save`'s record, and every group opened since the
+    ///   `save` is closed. It never raises the depth. Usually the depth is the
+    ///   record's (the levels opened since are dropped), but the record can be
+    ///   higher than the depth when something removed levels beneath it, as
+    ///   closing a group opened before the `save` does
+    ///   (`gsave << >> begingroup save endgroup restore`: the record is 2, the
+    ///   depth after `endgroup` is 1, and it stays 1 after `restore`).
+    ///   `grestoreall` with a `save` live truncates to the record the same
+    ///   way, except that a group opened since the `save` stops it at the
+    ///   group's level and is not closed.
+    /// - `grestore` has floors where it restores a state and pops nothing: the
+    ///   innermost `save`'s record, a group's own level (a group opened since
+    ///   that `save`), and 0; the higher one applies. A record above the
+    ///   current depth (the case above) makes `grestore` pop nothing at all
+    ///   until the depth is past it. `grestoreall` pops to the same floors at
+    ///   once. So `after - before` can be negative.
+    /// - `begingroup` takes a `gsave` level of its own, so inside a group the
+    ///   depth is `d + 1`, then `d + 1 + k` after the body's `k` unmatched
+    ///   `gsave`s. `endgroup` truncates the stack to the group's level and
+    ///   pops that too, so afterwards it is `d`: the group's level and the `k`
+    ///   levels the body left are gone, whether the body balanced its `gsave`s
+    ///   or not. A `grestore` the body did extra stops at the group's level,
+    ///   so `endgroup` lands on `d`. **Conditions:** the group is not a
+    ///   `PaintProc`'s own over-restoring (below), and the body did not
+    ///   `restore` a `save` made before the group.
+    /// - A group closed by something other than its `endgroup`: `erasepage`,
+    ///   `showpage`, `copypage`, the end of the run, an uncaught error, a limit
+    ///   or the interrupt flag lands on `d` as `endgroup` does. A group closed
+    ///   by a `restore` (or `grestoreall`) of a `save` made **before** it lands
+    ///   on that `save`'s record, which is at most `d` and lower when
+    ///   levels opened between the `save` and the group:
+    ///   `gsave save gsave << >> begingroup gsave restore` has `d` = 2, 3 in
+    ///   the group, 4 after the `gsave`, and 1 after the `restore`.
+    ///   [`open_group_count`](Self::open_group_count) says whether a group is
+    ///   open.
+    /// - A pattern's `PaintProc` runs one level above the depth the fill
+    ///   began at, and the host sees the page's levels as well as the
+    ///   `PaintProc`'s own (unlike `open_group_count`, which reports the
+    ///   page's groups only). When it ends, the levels it left open are
+    ///   dropped, so a `PaintProc` that balances its `gsave`s leaves the depth
+    ///   as it was before the pattern painted. A Type 3 glyph's `BuildChar`
+    ///   or `BuildGlyph` is the same: one level up while it runs, back after
+    ///   it. **Today a `PaintProc` or `BuildChar` that `grestore`s more than
+    ///   it `gsave`d is not stopped at its own level**, as a `save` and a
+    ///   group stop one: it pops levels of its caller's (a `PaintProc` even
+    ///   ones below a page group, since a page group is no floor inside it,
+    ///   after which the page's `endgroup` lands below its `d`), and the
+    ///   depth stays lowered after it ends. Ghostscript raises an error there
+    ///   instead. This is the interpreter's current behaviour, not a promise,
+    ///   and a later release may stop at the level; a host that cannot trust
+    ///   its callers' procedures should read the depth again afterwards, not
+    ///   assume the landing points above.
+    /// - A caught error (`stopped`, `stop`) does not unwind the levels
+    ///   `gsave`d in the code between the `stopped` and the error: they stay,
+    ///   exactly as a group stays open. **The exception is a callback the
+    ///   interpreter runs:** an error that escapes a `PaintProc` or a
+    ///   `BuildChar`, even one an outer `stopped` catches, unwinds that
+    ///   callback and removes the levels it opened, so the depth after the
+    ///   catch is the one before the fill or `show` (`gsave << /PatternType 1
+    ///   ... /PaintProc { pop gsave gsave nosuchop } >> matrix makepattern
+    ///   setpattern { 0 0 30 30 rectfill } stopped pop` reads 1 before, 4 in
+    ///   the callback, 1 after). A `stopped` inside the callback is not
+    ///   escaping it: the levels stay until the callback ends. An error that
+    ///   is not caught and ends the run leaves the levels `gsave`d outside any
+    ///   callback on the stack, and nothing resets the depth between runs
+    ///   either: the next `run_str` starts from that depth, so a host that
+    ///   wants a known depth reads it before running. The one exception is a
+    ///   group open at the end of the run, which is closed (above).
+    /// - Nothing else moves it: `showpage`, `erasepage`, `initgraphics`,
+    ///   `setpagedevice` and `nulldevice` leave the depth as it is (a group
+    ///   opened after `nulldevice` takes its level like any other).
+    ///
+    /// **A host that wants "what did this procedure leave"** reads the depth
+    /// before and after and uses the difference, and must not assume the
+    /// procedure balanced anything: a body can leave levels, pop its
+    /// caller's, close a group by `restore`, or die in a callback. The rules
+    /// above say what happens to each case; none of them makes the
+    /// difference independent of what the procedure did.
+    ///
+    /// A read of the interpreter's state: it costs no steps, memory or time
+    /// against the limits, and changes nothing. Between the slices of
+    /// [`begin_source`](Interp::begin_source) and [`step_n`](Interp::step_n)
+    /// it answers for the program so far. Like the rest of the crate API this
+    /// is Experimental (`docs/STABILITY.md`): it can change in any release.
+    /// There is no PostScript operator for it (Ghostscript has none either).
+    ///
+    /// ```
+    /// use std::{cell::RefCell, rc::Rc};
+    /// let mut interp = pscat::Interp::with_page(2, 2).expect("valid page size");
+    /// // A host operator reads the depth while the program runs.
+    /// let seen = Rc::new(RefCell::new(Vec::new()));
+    /// let log = seen.clone();
+    /// interp.register_operator("depth", move |i| {
+    ///     log.borrow_mut().push(i.gsave_depth());
+    ///     Ok(())
+    /// })?;
+    /// interp.run_str("depth gsave depth gsave depth grestore depth
+    ///                 << >> begingroup depth gsave gsave depth endgroup depth")?;
+    /// // Group opened at depth 1: its own level makes 2, the body's two
+    /// // `gsave`s make 4, and `endgroup` is back to the 1 it began at.
+    /// assert_eq!(*seen.borrow(), [0, 1, 2, 1, 2, 4, 1]);
+    /// assert_eq!(interp.gsave_depth(), 1); // the program left one open
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn gsave_depth(&self) -> usize {
+        self.gfx().gsave_depth()
     }
 }

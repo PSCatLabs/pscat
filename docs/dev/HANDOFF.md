@@ -896,6 +896,11 @@ renders eight examples in both and compares block-downsampled output).
   groups with `captures == 0` (the page's, the ones `swap_canvas` and a
   `PaintProc`'s `endgroup` see), and `Group::serial` from the never-reset
   `Gfx::groups_opened`. Keep them pure reads on `&self`.
+  `Interp::gsave_depth()` (#1497, `host.rs`, `notes/1497-gsave-depth.md`) is
+  `Gfx::saved.len()`: `save` pushes no level, `begingroup`, a `PaintProc` and a
+  Type 3 `BuildChar` push one of their own, `endgroup` truncates to the group's
+  start. It is the one stack across captures, so inside a `PaintProc` it includes
+  the page's levels. Keep it a pure read on `&self`.
 - `gstate .sameclip bool` (issue #488) is a third pscat extension, dot-named
   because it is non-standard (gs has no `.sameclip`): true when the clip in
   force is the very clip chain the gstate holds (both none, or the same
