@@ -42,12 +42,28 @@
 % Licence: the same as the rest of pscat's lib/ (MIT OR Apache-2.0;
 % THIRD_PARTY_NOTICES.md).
 %
+% Loading (#1492): run this file before the first findfont of its faces
+% (a findfont before it silently gives the Helvetica substitute under
+% that name), and run it once, in a program's setup, not per page or
+% frame: preparing the glyphs takes some milliseconds. It registers its
+% faces (each with /FontName, the name it is registered under) and
+% leaves one name in the dictionary current when it runs, pf-variant;
+% nothing else. A program with a pf-variant of its own runs the file
+% inside a dictionary of its own:
+%   10 dict begin (lib/fonts/phosphor.ps) run ... end
+%
+% /Bitmaps /space is one row of dark pixels as wide as the face's glyph
+% box: the 8-column cell less its last column, which every glyph but
+% underscore leaves dark, so (.......). The proportional faces in
+% diode7.ps and diode5.ps follow the same rule with /Gap as the gap. A
+% program reading the rows needs no special case for it.
+%
 % Draws nothing on load; runs unchanged in Ghostscript.
 
-/PhosphorDict 40 dict def
-PhosphorDict begin
+40 dict begin   % the font dict: anonymous until definefont below (#1492)
 
   /FontType 3 def
+  /FontName /Phosphor def      % the name it is registered under
   /FontMatrix [0.0625 0 0 0.0625 0 0] def   % 16 pixel rows to the em
   /FontBBox [0 -4 8 12] def
   /Cell 8 def                % advance, pixels (monospaced)
@@ -62,7 +78,7 @@ PhosphorDict begin
   /Bitmaps 100 dict def
   Bitmaps begin
     /.notdef [] def
-    /space [] def
+    /space [(.......)] def
     /exclam [
       (..##...)
       (..##...)
@@ -1330,12 +1346,14 @@ PhosphorDict begin
     /x /y /z /braceleft /bar /braceright /asciitilde ]
   0 1 94 { 2 copy get exch 32 add exch Encoding 3 1 roll put } for pop
 
-end
-
-/Phosphor PhosphorDict definefont pop
+currentdict end
+/Phosphor exch definefont pop
 
 % /New /Base << dials >> pf-variant -   a copy of /Base with the dials
-% changed, defined as /New (the copy idiom: every key but FID).
+% changed, defined as /New (the copy idiom: every key but FID), its
+% /FontName set to /New. The stable entry point for variants: its name,
+% this signature and its place (the dictionary current when this file
+% runs) do not change.
 % A dial of the wrong type is a typecheck and one out of range a
 % rangecheck, raised here, before anything is defined: /DotShape /square
 % or /round, /DotSize above 0 up to 4, /ScanGap from 0 up to (not
@@ -1366,6 +1384,7 @@ end
   dup length 3 index length add dict begin
     { 1 index /FID ne { def } { pop pop } ifelse } forall
     exch { def } forall
+    /FontName 1 index def   % the variant's own name, whatever the dials say
   currentdict end definefont pop
 } bind def
 

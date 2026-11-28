@@ -184,6 +184,35 @@ const SVG_STOP_BYTES: usize = 256;
 /// `shfill_work` counts: a step per 1024.
 const PNG_ENCODE_UNITS: u64 = 32;
 
+/// The heap `encode_png` takes beyond its layer for a `px`-pixel image, at
+/// most (#1368, #1477): [`PNG_ENCODER_FIXED_BYTES`] and 20 bytes a pixel.
+///
+/// The per-pixel part: tiny-skia clones the pixmap to demultiply it (4 bytes a
+/// pixel); the png crate then deflates the whole image into one vector
+/// (`zlib_encoded`) and only afterwards copies it in chunks into the output
+/// vector, so at the peak both are alive and the output is growing by doubling
+/// (the old and the new buffer together): the clone, a vector of up to twice
+/// the compressed size `z`, and a growing one of up to three times: 4 + 5 z
+/// bytes a pixel. A layer's colours are opaque inside the shading, so `z` is
+/// its entropy, 3 bytes a pixel at the most (an image of independent random
+/// colours: 3.4 measured, alpha and the filter bytes included; the BBox
+/// mask's edges compress). Measured at eleven sizes from 300 to 2000 pixels a
+/// side, the peak ran from 9.1 to 16.2 bytes a pixel with where the doubling
+/// fell; the bound is 4 + 5 x 3.1 = 19.5, and 20 holds it. Re-measured with the
+/// fixed part below (1 x 1 to 300 x 300, flat and random colours) the peak
+/// stayed under `20 px` plus it.
+fn png_encode_bytes(px: usize) -> usize {
+    px.saturating_mul(20)
+        .saturating_add(PNG_ENCODER_FIXED_BYTES)
+}
+
+/// The heap the png crate's default (miniz) compressor takes whatever the image
+/// is (#1477): measured with the tracking allocator, a 1 x 1 image's
+/// `encode_png` peaks 319,562 bytes past it (the buffers are the compressor's,
+/// the same at 2 x 2 and 8 x 8, 320,702 at 16 x 16), the fixed part of every
+/// peak at the sizes where it matters. 384 KiB holds it with room.
+const PNG_ENCODER_FIXED_BYTES: usize = 384 * 1024;
+
 /// Units of work writing that second gradient for `stops` stops is: a tag a
 /// stop, about as much as painting 500 pixels.
 fn svg_second_gradient_work(stops: usize) -> u64 {
@@ -2906,9 +2935,14 @@ impl Gfx {
     /// `[x0, y0, x1, y1]`, cut to the canvas), which must hold every pixel
     /// the mark paints; the second value is that work, which a limited
     /// caller charges.
+    ///
+    /// `pen` is a pen-space stroke's map to device (`None` for a fill and
+    /// the rest): the recorder keys the shading's `<pattern>` by it, so the
+    /// image's write is looked at for the same key it will be recorded under.
     pub(crate) fn pattern_source(
         &self,
         region: [i64; 4],
+        pen: Option<Transform>,
         probe: &crate::limits::LimitProbe,
     ) -> Result<(Option<PatternSource>, u64), PsError> {
         // From `ink`, so the raster and the recorders never disagree.
@@ -2940,7 +2974,7 @@ impl Gfx {
                 let (layer, work) = shading_layer(&sp.shading, sp.background, matrix, rect, probe)?;
                 // The SVG image of a use in another context is made now,
                 // under the same limits and before anything is recorded.
-                let use_work = self.svg_use_image(&sp, place.map(|p| p.hop), probe, work)?;
+                let use_work = self.svg_use_image(&sp, place.map(|p| p.hop), pen, probe, work)?;
                 Ok((
                     Some((
                         std::rc::Rc::new(layer),
@@ -2975,13 +3009,11 @@ impl Gfx {
         &self,
         sp: &crate::pattern::ShadingPattern,
         hop: Option<Transform>,
+        pen: Option<Transform>,
         probe: &crate::limits::LimitProbe,
         spent: u64,
     ) -> Result<u64, PsError> {
         let canvas = (self.pixmap.width(), self.pixmap.height());
-        let Some(key) = sp.svg.as_ref().and_then(|_| sp.svg_use_key(hop, canvas)) else {
-            return Ok(0);
-        };
         let Some(svg) = &self.svg else {
             return Ok(0);
         };
@@ -2989,6 +3021,22 @@ impl Gfx {
         let mut left = *probe;
         left.steps_left = left.steps_left.map(|l| l.saturating_sub(spent / 1024));
         let probe = &left;
+        let Some(key) = sp.svg.as_ref().and_then(|_| sp.svg_use_key(hop, canvas)) else {
+            // The image `makepattern` made serves this mark: the recorder
+            // writes it inline into a `<pattern>` before anything else is
+            // recorded (one for each pen it strokes under). The write is held
+            // against the cap, charged and looked at on the clock first, for
+            // the key it will be recorded under (#1477).
+            if let Some(img) = sp.svg.as_ref().and_then(|v| v.image.as_ref()) {
+                let write = svg.made_image_cost(sp, hop, pen, img.0.len());
+                if write > 0 {
+                    probe.check_alloc(write)?;
+                    probe.check(write as u64 / 1024)?;
+                }
+                return Ok(write as u64);
+            }
+            return Ok(0);
+        };
         let cached = sp.svg_uses.borrow().get(&key).cloned();
         if let Some(entry) = cached {
             // Made for an earlier mark: only this recorder's def is new, if
@@ -3031,7 +3079,7 @@ impl Gfx {
         let px = (rect.2 as usize).saturating_mul(rect.3 as usize);
         let encode_work = (px as u64).saturating_mul(PNG_ENCODE_UNITS);
         probe.check(work.saturating_add(encode_work) / 1024)?;
-        probe.check_alloc(px.saturating_mul(8).saturating_add(4096))?;
+        probe.check_alloc(png_encode_bytes(px))?;
         // An image embedded in an SVG, not a file pscat writes: no
         // resolution to record (as in `image.rs`).
         #[allow(clippy::disallowed_methods)]
@@ -3323,7 +3371,7 @@ impl Gfx {
                     b[3].max(i64::from(r.y1)),
                 ]
             });
-        let (pattern, layer_work) = match self.pattern_source(region, probe) {
+        let (pattern, layer_work) = match self.pattern_source(region, None, probe) {
             Ok(p) => p,
             Err(e) => {
                 self.coverage = Some(cov);
@@ -4209,7 +4257,11 @@ impl Gfx {
             // before the raster source reads it; its work is charged too.
             let mut lay_work = 0;
             self.lay_pattern(probe, &mut lay_work)?;
-            let (src, layer_work) = self.pattern_source(draw.device_bounds(&stroke), probe)?;
+            let (src, layer_work) = self.pattern_source(
+                draw.device_bounds(&stroke),
+                pen.as_ref().map(|p| p.to_device),
+                probe,
+            )?;
             work = work.saturating_add(layer_work).saturating_add(lay_work);
             self.prepare_paint();
             let paint = self.paint_from(&src);
@@ -6138,7 +6190,6 @@ impl Gfx {
         let geom = crate::pattern::geometry(&spec)?;
         crate::pattern::check_fold(&geom)?;
         let (cw, ch) = geom.content;
-        let (pw, ph) = geom.period;
         if self.captures.len() >= crate::pattern::MAX_CAPTURE_DEPTH {
             return Err(PsError::ExecStackOverflow);
         }
@@ -6150,7 +6201,7 @@ impl Gfx {
         if open + crate::pattern::tile_pixels(&geom) > crate::pattern::MAX_NESTED_PIXELS {
             return Err(PsError::Limitcheck);
         }
-        self.budget_allows((cw as usize * ch as usize + pw as usize * ph as usize) * 4)?;
+        self.budget_allows(crate::pattern::cell_bytes(&geom, true))?;
         let content = Pixmap::new(cw, ch).ok_or(PsError::Limitcheck)?;
         let to_gs = crate::pattern::capture_to_gs(&spec, &geom, origin.to_gs);
         let id = lazy.id;
@@ -6332,9 +6383,26 @@ impl Gfx {
     }
 
     /// The `PaintProc` returned: make the tile from what it painted.
+    ///
+    /// The period (and a lattice's oriented cell) are made now, after the
+    /// `PaintProc` has grown the heap since `begin_pattern` looked at it
+    /// (#1477): the heap is looked at again before they are, while the
+    /// capture is still open, and a refusal unwinds it as an error in the
+    /// `PaintProc` does, so the page, the SVG and the PDF are as they were
+    /// and the pattern runs again at its next use.
     pub(crate) fn end_pattern(
         &mut self,
     ) -> Result<std::rc::Rc<crate::pattern::PatternTile>, PsError> {
+        let bytes = self
+            .captures
+            .last()
+            .map(|cap| crate::pattern::cell_bytes(&cap.geom, false));
+        if let Some(bytes) = bytes
+            && let Err(e) = self.budget_allows(bytes)
+        {
+            self.abort_pattern();
+            return Err(e);
+        }
         let (mut cap, content, svg) = self.leave_capture();
         let svg = svg.map(|rec| rec.into_tile());
         // PDF's pattern matrix maps to the default space of the stream that
@@ -6461,10 +6529,32 @@ impl Gfx {
                 Some(rect) => {
                     let (layer, w) = shading_layer(&shading, None, matrix, rect, probe)?;
                     work += w;
+                    // The encoder copies the pixels and writes its output,
+                    // which deflate bounds by about the input: both held
+                    // against the cap while the layer is still live, and the
+                    // encoding's work against the step limit, before it runs
+                    // (#1477, as `svg_use_image` does).
+                    let px = (rect.2 as usize).saturating_mul(rect.3 as usize);
+                    let encode_work = (px as u64).saturating_mul(PNG_ENCODE_UNITS);
+                    probe.check(work.saturating_add(encode_work) / 1024)?;
+                    probe.check_alloc(png_encode_bytes(px))?;
                     // An image embedded in an SVG, not a file pscat writes: no
                     // resolution to record (as in `image.rs`).
                     #[allow(clippy::disallowed_methods)]
                     let png = layer.encode_png().map_err(|_| PsError::Limitcheck)?;
+                    drop(layer);
+                    // What the first mark that paints with it will write, and
+                    // a look at the clock after the encoding, before the
+                    // pattern is made.
+                    let write = self
+                        .svg
+                        .as_ref()
+                        .map_or(0, |svg| svg.made_write_bytes(png.len()));
+                    probe.check_alloc(write)?;
+                    work = work
+                        .saturating_add(encode_work)
+                        .saturating_add(write as u64);
+                    probe.check(work / 1024)?;
                     Some((png, rect.2, rect.3, rect.0, rect.1))
                 }
                 None => None,

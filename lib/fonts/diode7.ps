@@ -43,12 +43,28 @@
 % the grid. Licence: the same as the rest of pscat's lib/ (MIT OR
 % Apache-2.0; THIRD_PARTY_NOTICES.md).
 %
+% Loading (#1492): run this file before the first findfont of its faces
+% (a findfont before it silently gives the Helvetica substitute under
+% that name), and run it once, in a program's setup, not per page or
+% frame: preparing the glyphs takes some milliseconds. It registers its
+% faces (each with /FontName, the name it is registered under) and
+% leaves one name in the dictionary current when it runs, pf-variant;
+% nothing else. A program with a pf-variant of its own runs the file
+% inside a dictionary of its own:
+%   10 dict begin (lib/fonts/diode7.ps) run ... end
+%
+% /Bitmaps /space is one row of dark pixels as wide as the face's glyph
+% box: the advance less the /Gap after each glyph, so (..), 2 + /Gap 1 =
+% 3. The monospaced faces in phosphor.ps and pinpoint.ps follow the same
+% rule with the cell's dark last column as the gap. A program reading the
+% rows needs no special case for it.
+%
 % Draws nothing on load; runs unchanged in Ghostscript.
 
-/Diode7Dict 40 dict def
-Diode7Dict begin
+40 dict begin   % the font dict: anonymous until definefont below (#1492)
 
   /FontType 3 def
+  /FontName /Diode7 def      % the name it is registered under
   /FontMatrix [0.125 0 0 0.125 0 0] def   % eight LED rows to the em
   /FontBBox [0 -1 6 7] def
   /Proportional true def
@@ -1054,12 +1070,14 @@ Diode7Dict begin
     /x /y /z /braceleft /bar /braceright /asciitilde ]
   0 1 94 { 2 copy get exch 32 add exch Encoding 3 1 roll put } for pop
 
-end
-
-/Diode7 Diode7Dict definefont pop
+currentdict end
+/Diode7 exch definefont pop
 
 % /New /Base << dials >> pf-variant -   a copy of /Base with the dials
-% changed, defined as /New (the copy idiom: every key but FID).
+% changed, defined as /New (the copy idiom: every key but FID), its
+% /FontName set to /New. The stable entry point for variants: its name,
+% this signature and its place (the dictionary current when this file
+% runs) do not change.
 % A dial of the wrong type is a typecheck and one out of range a
 % rangecheck, raised here, before anything is defined: /DotShape /square
 % or /round, /DotSize above 0 up to 4, /ScanGap from 0 up to (not
@@ -1090,6 +1108,7 @@ end
   dup length 3 index length add dict begin
     { 1 index /FID ne { def } { pop pop } ifelse } forall
     exch { def } forall
+    /FontName 1 index def   % the variant's own name, whatever the dials say
   currentdict end definefont pop
 } bind def
 %%EOF

@@ -423,3 +423,146 @@ fn a_caught_error_in_buildchar_unwinds_its_dictionaries() {
         }
     }
 }
+
+/// #1492: a font file defines one general name in the dictionary current
+/// when it runs, `pf-variant` (the documented entry point psanim's
+/// `pixelvariant` calls by name); the font dictionary it builds is
+/// anonymous until `definefont`. Run in userdict, only `pf-variant` is new;
+/// run in a private dictionary, that dictionary holds `pf-variant` alone and
+/// a program's own `pf-variant` in userdict survives.
+#[test]
+fn a_font_file_leaves_only_pf_variant_in_the_current_dict() {
+    for (path, _) in FILES {
+        let mut it = Interp::with_page(10, 10).expect("page");
+        run(
+            &mut it,
+            &format!(
+                "/before 0 def /before userdict length def
+                 ({path}) run
+                 userdict length before 1 add eq
+                 userdict /pf-variant known and"
+            ),
+        );
+        assert_eq!(
+            top(&it),
+            "true",
+            "{path}: a name other than pf-variant leaked into userdict"
+        );
+
+        let mut it = Interp::with_page(10, 10).expect("page");
+        run(
+            &mut it,
+            &format!(
+                "/pf-variant 123 def
+                 /priv 10 dict def priv begin ({path}) run end
+                 priv length 1 eq
+                 priv /pf-variant known and
+                 /pf-variant load 123 eq and"
+            ),
+        );
+        assert_eq!(
+            top(&it),
+            "true",
+            "{path}: run in a private dict, it left more than pf-variant there or touched userdict"
+        );
+    }
+}
+
+/// #1492: `pf-variant` works wherever the file was run, called by name with
+/// that dictionary on the stack or fetched from it and executed with the
+/// dictionary off the stack (how psanim calls it), and in userdict.
+#[test]
+fn pf_variant_works_from_a_private_dict_and_from_userdict() {
+    for (path, faces) in FILES {
+        let face = faces[0];
+        let check = |setup: &str| {
+            let mut it = Interp::with_page(10, 10).expect("page");
+            run(
+                &mut it,
+                &format!(
+                    "{setup}
+                     /V findfont /DotSize get 0.9 eq
+                     /V findfont /DotShape get /square eq and
+                     /V findfont 10 scalefont setfont (A) stringwidth pop 0 gt and
+                     /{face} findfont /DotShape get /V findfont /DotShape get ne
+                     /{face} findfont /DotSize get 0.9 ne or and"
+                ),
+            );
+            assert_eq!(top(&it), "true", "{path}: {setup}");
+        };
+        let dials = format!("/V /{face} << /DotSize 0.9 /DotShape /square >>");
+        check(&format!(
+            "/priv 10 dict def priv begin ({path}) run {dials} pf-variant end"
+        ));
+        check(&format!(
+            "/priv 10 dict def priv begin ({path}) run end {dials} priv /pf-variant get exec"
+        ));
+        check(&format!("({path}) run {dials} pf-variant"));
+    }
+}
+
+/// #1492: every face carries `/FontName`, the name it is registered under,
+/// and so does a variant `pf-variant` makes (it is not the base's name,
+/// even when the dials try to set one).
+#[test]
+fn every_face_and_variant_carries_its_registered_font_name() {
+    for (path, faces) in FILES {
+        let mut it = loaded(path, 10, 10);
+        for face in faces {
+            run(
+                &mut it,
+                &format!(
+                    "/{face} findfont dup /FontName known {{ /FontName get /{face} eq }} {{ pop false }} ifelse
+                     /V-{face} /{face} << /DotSize 0.9 /FontName /Wrong >> pf-variant
+                     /V-{face} findfont /FontName get /V-{face} eq and"
+                ),
+            );
+            assert_eq!(
+                top(&it),
+                "true",
+                "{face}: /FontName missing or not the registered name"
+            );
+        }
+    }
+}
+
+/// #1492: `/Bitmaps /space` is one row of dark pixels on every face, as wide
+/// as the face's glyph box: the advance less the dark gap after a glyph
+/// (`/Gap` on the proportional faces, the last `/Cell` column on the
+/// monospaced ones, whose rows are 7 wide). The advances are the ones the
+/// faces had before #1492: the row change does not move any text.
+#[test]
+fn the_space_row_is_one_dark_row_as_wide_as_its_glyph_box() {
+    // (file, face, space advance in font pixels, the gap after a glyph: the
+    // font's /Gap on a proportional face; on a monospaced face (/Gap 0) the
+    // cell's last column, which the glyph rows leave dark, so 1)
+    let cases = [
+        ("lib/fonts/phosphor.ps", "Phosphor", 8, 1),
+        ("lib/fonts/phosphor.ps", "Phosphor-Scan", 8, 1),
+        ("lib/fonts/pinpoint.ps", "Pinpoint-Draft", 8, 1),
+        ("lib/fonts/pinpoint.ps", "Pinpoint-NLQ", 8, 1),
+        ("lib/fonts/diode7.ps", "Diode7", 3, 1),
+        ("lib/fonts/diode5.ps", "Diode5", 3, 1),
+    ];
+    for (path, face, adv, gap) in cases {
+        let mut it = loaded(path, 10, 10);
+        run(
+            &mut it,
+            &format!(
+                "/F /{face} findfont def
+                 /S F /Bitmaps get /space get def
+                 S length 1 eq
+                 {{ true S 0 get {{ 46 eq and }} forall
+                    S 0 get length {gap} add {adv} eq and
+                    F /Proportional get {{ F /Gap get {gap} eq and }} if }} {{ false }} ifelse
+                 F 1 F /FontMatrix get 0 get div scalefont setfont
+                 ( ) stringwidth pop {adv} sub abs 1e-6 lt and"
+            ),
+        );
+        assert_eq!(
+            top(&it),
+            "true",
+            "{face}: /space is not one dark row as wide as its advance {adv}"
+        );
+    }
+}
