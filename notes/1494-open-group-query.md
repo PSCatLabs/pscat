@@ -54,3 +54,15 @@ uncaught error, a step limit and the interrupt flag, a group left open between
 slices, a refused `begingroup`, `nulldevice`, three `PaintProc` cases, the serial
 across `restore`, page boundaries and runs, and `swap_canvas` itself (the swapped-in
 page shows the paint only after `endgroup` while a group is open).
+
+**Requirements relayed from the psanim session (2026-11-27).** Count and id are the
+page's (above); any route counts (`systemdict`, `//begingroup`, a bound procedure;
+tested); `copypage` is in the closers test; a `PaintProc`'s `endgroup` leaves both
+unchanged (tested); the id is the group's own, taken when it opens, so inner groups
+opened and closed in a body leave it alone
+(`a_group_keeps_its_own_id_while_inner_groups_come_and_go`); both are `&self`, and
+every test reads them from inside a host operator mid-run with groups open (the
+`probe` operator; the doc tests do the same). One point where the wording differs
+from the interpreter: an error that is *caught* (`stopped`) does not end a group
+(neither does it end a `gsave`); only an uncaught one does, with the run. Documented
+and pinned (`error_recovery_closes_by_the_interpreters_own_rules`).

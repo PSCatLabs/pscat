@@ -156,6 +156,25 @@ fn the_serial_names_the_group_and_never_repeats() {
     assert_eq!(it.innermost_group_serial(), None);
 }
 
+/// Each group has its own id, taken when it opens: a body that opens and
+/// closes inner groups between two readings leaves the outer group's id as it
+/// was (a count of groups ever opened would have moved), and a body that
+/// closes the group it is in and opens another at the same depth changes it.
+/// Asked from inside a host operator, mid-run, with groups open.
+#[test]
+fn a_group_keeps_its_own_id_while_inner_groups_come_and_go() {
+    let r = read(
+        "<< >> begingroup probe
+         { << >> begingroup endgroup << >> begingroup << >> begingroup endgroup endgroup } exec
+         probe
+         { endgroup << >> begingroup } exec probe",
+    );
+    assert_eq!(counts_of(&r), [1, 1, 1]);
+    assert_eq!(r[0].1, 1);
+    assert_eq!(r[1].1, 1, "the outer group is the same group");
+    assert!(r[2].1 > 4, "a different group at the same depth: {r:?}");
+}
+
 /// A group that did not open (a refused `begingroup`) takes no serial:
 /// the count of groups opened is of the ones that were.
 #[test]

@@ -1471,7 +1471,8 @@ impl Interp {
     /// Which group is the innermost one open on the page: its serial, or
     /// `None` with no group open (#1494). A serial is the number of groups
     /// the interpreter has opened when this one began, counting from 1, so it
-    /// is monotonic and never repeats for the life of the interpreter: not
+    /// is the group's own, fixed when it opens (groups opened and closed inside
+    /// it do not change it), monotonic, and never repeats for the life of the interpreter: not
     /// after the group is closed, not after a `restore` or a page boundary
     /// closed it, not across runs. Equal serials mean the same group.
     ///
