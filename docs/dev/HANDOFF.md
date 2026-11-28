@@ -2189,6 +2189,19 @@ renders eight examples in both and compares block-downsampled output).
   of a `noaccess` string and `search`/`anchorsearch`/`token` on one are `invalidaccess` (no flagged
   views come back, gs refuses). `tests/exec_strings.rs`;
   `notes/1321-executable-string-gs-parity.md`.
+- **Parameter, cache, job-control, overprint and smoothness operators (#1270).** `src/ops/params.rs`:
+  `setuserparams`/`currentuserparams`, `setsystemparams`/`currentsystemparams`,
+  `setdevparams`/`currentdevparams`, the font and path cache operators, `vmreclaim`,
+  `setvmthreshold`, `startjob` and `exitserver` (an operator in `serverdict`). The tables of
+  parameters (`USER`, `SYSTEM`) carry gs's type and range checks; the user set is an
+  `Rc<Vec<PVal>>` in `Interp::params` that each `SaveRecord` holds, so `restore` rolls it
+  back and a `save` copies nothing. A parameter that would change a limit or reach outside
+  the sandbox is `invalidaccess` unless set to its current value. `setoverprint` and
+  `setsmoothness` are `GraphicsState` fields (`initgraphics` keeps overprint, resets
+  smoothness); `shareddict` is the `globaldict` object. Every operand count and error is
+  pinned from gs in `tests/data/params_cases.txt` (`tests/params.rs`, with `DEVIATIONS`).
+  A new parameter goes in the table with the kind gs checks it by. Details and every
+  deviation: `notes/1270-parameter-operators.md`.
 - **`countexecstack`, `execstack`, `dictstack` (#1468).** The native `Frame` stack is shown as gs
   10.07.1 shows the same constructs (`frame_shape` / `frame_entries` at the end of `src/interp.rs`:
   a procedure as its read-only unexecuted rest, a loop as its control values, body and the loop
