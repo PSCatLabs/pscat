@@ -367,6 +367,58 @@ fn foreign_use_images_never_take_the_heap_past_the_cap() {
         refused > 0 && fitted > 0,
         "the ladder crosses the write's size"
     );
+    let cap = first_fit.expect("a cap fits") * MIB;
+    // The marks after the first write nothing, so a cap that holds the one
+    // write holds a hundred marks: they are not held to a second write's room.
+    let many = format!(
+        "{} grad setpattern 0 1 99 {{ 0 exch 3 1 rectfill }} for",
+        grad_n(1000, 512)
+    );
+    let (_, r, svg, _, _) = run_full(1000, "", &many, cap);
+    assert_eq!(
+        (r, svg.matches("<image ").count()),
+        (Ok(()), 1),
+        "100 marks"
+    );
+    // Strokes under a pen of their own each write a copy of the image into
+    // a `<pattern>` of their own: each is held to the room for it, so the
+    // cap that holds one copy stops the hundred, and the clock and the
+    // steps see each (Codex round 1 on PR #1493, M2).
+    let pens = format!(
+        "{} grad setpattern 0 0 1 1 rectfill \
+         100 {{ 1.01 1 scale 0 0 moveto 1 1 lineto stroke }} repeat",
+        grad_n(1000, 512)
+    );
+    let (peak, r, svg, _, _) = run_full(1000, "", &pens, cap);
+    assert_eq!(r, Err(PsError::MemoryExceeded), "the pens do not fit {cap}");
+    assert!(
+        peak <= cap + margin,
+        "the heap grew {:.2} MiB past its start under a {} MiB cap",
+        peak as f64 / MIB as f64,
+        cap / MIB
+    );
+    let copies = svg.matches("<image ").count();
+    assert!(copies < 3, "{copies} copies of the image under the cap");
+
+    // M1: the png compressor's own buffers (about 320 KB whatever the image)
+    // are held too: a 1 x 1 image has no layer to speak of, and a heap 100
+    // KB under the cap has room for its pixels but not for the encoder.
+    let mut it = Interp::with_page(1, 1).expect("page");
+    it.gfx_mut().enable_svg();
+    it.set_limits(Limits::none().with_max_memory(MIB))
+        .expect("the allocator is installed");
+    let one_pixel = "<< /PatternType 2 /Shading << /ShadingType 1 /ColorSpace /DeviceRGB \
+         /Matrix [1 0 0 1 0 0] /Function << /FunctionType 0 /Domain [0 1 0 1] \
+         /Range [0 1 0 1 0 1] /Size [2 2] /BitsPerSample 8 \
+         /DataSource <ff0000 00ff00 0000ff ffffff> >> >> >> matrix makepattern /grad exch def";
+    let src = format!("900000 string /big exch def {one_pixel} /done true def");
+    let (peak, r) = peak_growth(|| it.run_source(src.as_bytes()));
+    assert_eq!(r, Err(PsError::MemoryExceeded), "stops at the cap");
+    assert!(
+        peak <= MIB + margin,
+        "the heap grew {:.2} MiB past its start under a 1 MiB cap",
+        peak as f64 / MIB as f64
+    );
 
     // #1477: the end of a `PaintProc` looks at the heap again. This one
     // grows it by 8 MB of its own and leaves three operands behind, so a cap

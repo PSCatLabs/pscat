@@ -34,9 +34,12 @@ not look at (only the foreign image was). `pattern_source` now holds the cap
 against `SvgRecorder::made_image_cost` (two copies of the base64 and the
 defs' growth) before the mark records, and the recorder writes the base64
 straight into the content instead of through a formatted copy (the same bytes).
-A mark whose pattern the recorder wrote already (same hop, no pen) costs
-nothing, so a hundred marks need no more room than one. A pen-space stroke
-after it writes a copy of its own, which is not looked at (a follow-up).
+A mark whose pattern the recorder wrote already, under the same hop and pen
+(the key `shading_ref` records it under; `pattern_source` is given the stroke's
+pen), costs nothing, so a hundred marks need no more room than one. A stroke
+under another pen writes a copy of its own and is held to the room for it, charged
+as steps, and the clock is polled (Codex round 1, M2); a hundred such strokes
+under a cap that holds one copy stop at it.
 
 **The encoder's bound was too low** (`png_encode_bytes`). #1475 held the heap
 against 8 bytes a pixel for the encoder's copy and output. The png crate
@@ -48,7 +51,12 @@ opaque inside its shading, so z is its entropy: 3.4 measured for independent
 random colours (alpha and filter bytes included), 3.1 at most in a shading.
 Measured at eleven sizes from 300 to 2000 pixels a side, `encode_png` peaked
 from 9.1 to 16.2 bytes a pixel, by where the doubling fell; the bound is 19.5
-and both users now hold 20 a pixel.
+and both users now hold 20 a pixel, plus a fixed part for the compressor's own
+buffers: miniz allocates about 320 KB whatever the image (319,562 bytes at 1 x 1,
+measured with the tracking allocator, the same at 2 x 2 and 8 x 8), so
+`PNG_ENCODER_FIXED_BYTES` is 384 KiB where #1475 had 4 KiB (Codex round 1, M1).
+Re-measured at 1 x 1 to 300 x 300, flat and random colours, the peak stays under
+20 a pixel plus it; the per-pixel decision stands.
 
 **What it costs.** A capped SVG run now needs about 24 bytes a pixel of headroom
 (the 4 of the layer and the 20) to `makepattern` a Type 1 or mesh shading on a

@@ -185,22 +185,33 @@ const SVG_STOP_BYTES: usize = 256;
 const PNG_ENCODE_UNITS: u64 = 32;
 
 /// The heap `encode_png` takes beyond its layer for a `px`-pixel image, at
-/// most, plus the encoder's fixed state (#1368, #1477). tiny-skia clones the
-/// pixmap to demultiply it (4 bytes a pixel); the png crate then deflates the
-/// whole image into one vector (`zlib_encoded`) and only afterwards copies it
-/// in chunks into the output vector, so at the peak both are alive and the
-/// output is growing by doubling (the old and the new buffer together): the
-/// clone, a vector of up to twice the compressed size `z`, and a growing one of
-/// up to three times: 4 + 5 z bytes a pixel. A layer's colours are opaque
-/// inside the shading, so `z` is its entropy, 3 bytes a pixel at the most (an
-/// image of independent random colours: 3.4 measured, alpha and the filter
-/// bytes included; the BBox mask's edges compress). Measured at eleven sizes
-/// from 300 to 2000 pixels a side, the peak ran from 9.1 to 16.2 bytes a
-/// pixel with where the doubling fell; the bound is 4 + 5 x 3.1 = 19.5,
-/// and 20 holds it.
+/// most (#1368, #1477): [`PNG_ENCODER_FIXED_BYTES`] and 20 bytes a pixel.
+///
+/// The per-pixel part: tiny-skia clones the pixmap to demultiply it (4 bytes a
+/// pixel); the png crate then deflates the whole image into one vector
+/// (`zlib_encoded`) and only afterwards copies it in chunks into the output
+/// vector, so at the peak both are alive and the output is growing by doubling
+/// (the old and the new buffer together): the clone, a vector of up to twice
+/// the compressed size `z`, and a growing one of up to three times: 4 + 5 z
+/// bytes a pixel. A layer's colours are opaque inside the shading, so `z` is
+/// its entropy, 3 bytes a pixel at the most (an image of independent random
+/// colours: 3.4 measured, alpha and the filter bytes included; the BBox
+/// mask's edges compress). Measured at eleven sizes from 300 to 2000 pixels a
+/// side, the peak ran from 9.1 to 16.2 bytes a pixel with where the doubling
+/// fell; the bound is 4 + 5 x 3.1 = 19.5, and 20 holds it. Re-measured with the
+/// fixed part below (1 x 1 to 300 x 300, flat and random colours) the peak
+/// stayed under `20 px` plus it.
 fn png_encode_bytes(px: usize) -> usize {
-    px.saturating_mul(20).saturating_add(4096)
+    px.saturating_mul(20)
+        .saturating_add(PNG_ENCODER_FIXED_BYTES)
 }
+
+/// The heap the png crate's default (miniz) compressor takes whatever the image
+/// is (#1477): measured with the tracking allocator, a 1 x 1 image's
+/// `encode_png` peaks 319,562 bytes past it (the buffers are the compressor's,
+/// the same at 2 x 2 and 8 x 8, 320,702 at 16 x 16), the fixed part of every
+/// peak at the sizes where it matters. 384 KiB holds it with room.
+const PNG_ENCODER_FIXED_BYTES: usize = 384 * 1024;
 
 /// Units of work writing that second gradient for `stops` stops is: a tag a
 /// stop, about as much as painting 500 pixels.
@@ -2915,9 +2926,14 @@ impl Gfx {
     /// `[x0, y0, x1, y1]`, cut to the canvas), which must hold every pixel
     /// the mark paints; the second value is that work, which a limited
     /// caller charges.
+    ///
+    /// `pen` is a pen-space stroke's map to device (`None` for a fill and
+    /// the rest): the recorder keys the shading's `<pattern>` by it, so the
+    /// image's write is looked at for the same key it will be recorded under.
     pub(crate) fn pattern_source(
         &self,
         region: [i64; 4],
+        pen: Option<Transform>,
         probe: &crate::limits::LimitProbe,
     ) -> Result<(Option<PatternSource>, u64), PsError> {
         // From `ink`, so the raster and the recorders never disagree.
@@ -2949,7 +2965,7 @@ impl Gfx {
                 let (layer, work) = shading_layer(&sp.shading, sp.background, matrix, rect, probe)?;
                 // The SVG image of a use in another context is made now,
                 // under the same limits and before anything is recorded.
-                let use_work = self.svg_use_image(&sp, place.map(|p| p.hop), probe, work)?;
+                let use_work = self.svg_use_image(&sp, place.map(|p| p.hop), pen, probe, work)?;
                 Ok((
                     Some((
                         std::rc::Rc::new(layer),
@@ -2984,21 +3000,11 @@ impl Gfx {
         &self,
         sp: &crate::pattern::ShadingPattern,
         hop: Option<Transform>,
+        pen: Option<Transform>,
         probe: &crate::limits::LimitProbe,
         spent: u64,
     ) -> Result<u64, PsError> {
         let canvas = (self.pixmap.width(), self.pixmap.height());
-        let Some(key) = sp.svg.as_ref().and_then(|_| sp.svg_use_key(hop, canvas)) else {
-            // The image `makepattern` made serves this mark: the recorder
-            // writes it inline into a `<pattern>` before anything else is
-            // recorded, and the cap is looked at before it does (#1477).
-            if let (Some(svg), Some(img)) =
-                (&self.svg, sp.svg.as_ref().and_then(|v| v.image.as_ref()))
-            {
-                probe.check_alloc(svg.made_image_cost(sp, hop, img.0.len()))?;
-            }
-            return Ok(0);
-        };
         let Some(svg) = &self.svg else {
             return Ok(0);
         };
@@ -3006,6 +3012,22 @@ impl Gfx {
         let mut left = *probe;
         left.steps_left = left.steps_left.map(|l| l.saturating_sub(spent / 1024));
         let probe = &left;
+        let Some(key) = sp.svg.as_ref().and_then(|_| sp.svg_use_key(hop, canvas)) else {
+            // The image `makepattern` made serves this mark: the recorder
+            // writes it inline into a `<pattern>` before anything else is
+            // recorded (one for each pen it strokes under). The write is held
+            // against the cap, charged and looked at on the clock first, for
+            // the key it will be recorded under (#1477).
+            if let Some(img) = sp.svg.as_ref().and_then(|v| v.image.as_ref()) {
+                let write = svg.made_image_cost(sp, hop, pen, img.0.len());
+                if write > 0 {
+                    probe.check_alloc(write)?;
+                    probe.check(write as u64 / 1024)?;
+                }
+                return Ok(write as u64);
+            }
+            return Ok(0);
+        };
         let cached = sp.svg_uses.borrow().get(&key).cloned();
         if let Some(entry) = cached {
             // Made for an earlier mark: only this recorder's def is new, if
@@ -3340,7 +3362,7 @@ impl Gfx {
                     b[3].max(i64::from(r.y1)),
                 ]
             });
-        let (pattern, layer_work) = match self.pattern_source(region, probe) {
+        let (pattern, layer_work) = match self.pattern_source(region, None, probe) {
             Ok(p) => p,
             Err(e) => {
                 self.coverage = Some(cov);
@@ -4226,7 +4248,11 @@ impl Gfx {
             // before the raster source reads it; its work is charged too.
             let mut lay_work = 0;
             self.lay_pattern(probe, &mut lay_work)?;
-            let (src, layer_work) = self.pattern_source(draw.device_bounds(&stroke), probe)?;
+            let (src, layer_work) = self.pattern_source(
+                draw.device_bounds(&stroke),
+                pen.as_ref().map(|p| p.to_device),
+                probe,
+            )?;
             work = work.saturating_add(layer_work).saturating_add(lay_work);
             self.prepare_paint();
             let paint = self.paint_from(&src);

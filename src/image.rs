@@ -1027,7 +1027,7 @@ impl ImageCtx {
             let region = rect.map(i64::from);
             let mut lay_work = 0;
             gfx.lay_pattern(probe, &mut lay_work)?;
-            let (src, work) = gfx.pattern_source(region, probe)?;
+            let (src, work) = gfx.pattern_source(region, None, probe)?;
             self.layer_work.set(
                 self.layer_work
                     .get()

@@ -475,18 +475,19 @@ impl SvgRecorder {
     /// (#1477): the image sits inline in a `<pattern>`, whose content the
     /// clip and hop groups copy once each (two copies are alive at a time)
     /// before it goes into the defs. A mark whose pattern this recorder has
-    /// written already (at the same hop, with no pen) writes nothing and is
-    /// not charged; a pen-space stroke that comes after it writes a copy of
-    /// its own, which this does not look at.
+    /// written already, under the same hop and pen (`shading_ref`'s key),
+    /// writes nothing and costs nothing; a pen-space stroke under another pen
+    /// writes a copy of its own and is charged for it.
     pub(crate) fn made_image_cost(
         &self,
         sp: &ShadingPattern,
         hop: Option<tiny_skia::Transform>,
+        pen: Option<tiny_skia::Transform>,
         png_len: usize,
     ) -> usize {
         if self
             .shading_ids
-            .contains_key(&self.shading_key(sp, hop, None))
+            .contains_key(&self.shading_key(sp, hop, pen))
         {
             return 0;
         }
