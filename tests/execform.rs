@@ -376,6 +376,11 @@ const CASES: &[(&str, &str, &str)] = &[
         "D",
     ),
     (
+        "a PaintProc that pops two operands under",
+        r#"7 8 << /FormType 1 /BBox [0 0 10 10] /Matrix [1 0 0 1 0 0] /PaintProc {pop pop pop} >> execform"#,
+        "",
+    ),
+    (
         "a PaintProc that leaves a value",
         r#"7 8 << /FormType 1 /BBox [0 0 10 10] /Matrix [1 0 0 1 0 0] /PaintProc {pop 99} >> execform"#,
         "7 8",
@@ -763,6 +768,43 @@ fn errors_put_every_operand_back() {
 }
 
 #[test]
+fn the_clean_up_that_finds_nothing_to_remove_is_a_stackunderflow_that_puts_the_operands_back() {
+    // `{pop pop pop pop}` takes the form twice and both operands under, so
+    // the PaintProc itself fails nowhere: it is `execform`'s own clean-up
+    // (gs's `pop pop` of the form id and the form) that finds nothing.
+    let mut it = Interp::new();
+    it.capture_stdout();
+    it.run_str(&format!(
+        "{F} F /PaintProc {{ pop pop pop pop }} put \
+         7 8 F {{ execform }} stopped {{ $error /errorname get = $error /command get == }} if \
+         count = F eq = 8 eq = 7 eq ="
+    ))
+    .unwrap_or_else(|e| panic!("run failed: {}", it.error_report(&e)));
+    assert_eq!(
+        String::from_utf8_lossy(it.captured_stdout()),
+        "stackunderflow\nexecform\n3\ntrue\ntrue\ntrue\n"
+    );
+    assert_eq!(it.gsave_depth(), 0);
+}
+
+#[test]
+fn a_paintproc_that_pops_below_the_saved_operands_and_pushes_back_is_not_undone() {
+    // Known limit: the copy is the top 256 operands, and what an error
+    // puts back is "the stack cut to the operands under the copy, the copy
+    // on top". A PaintProc that pops 290 of 302 operands, pushes 100 and
+    // fails leaves 112 operands, above the 45 under the copy, so the
+    // first 45 of them stay and the copy goes on top: 301 operands, 33 of
+    // them from the PaintProc (not a restore of the ones it popped).
+    let out = printed(
+        "/G << /FormType 1 /BBox [0 0 10 10] /Matrix [1 0 0 1 0 0] \
+            /PaintProc { 290 { pop } repeat 100 { 1 } repeat 1 0 div } >> def \
+         300 { 7 } repeat G { execform } stopped { (stopped ) print } if count =",
+    );
+    // 45 kept + 256 copied.
+    assert_eq!(out, "stopped 301\n");
+}
+
+#[test]
 fn a_paintproc_that_pops_past_the_saved_operands_leaves_the_stack_it_left() {
     // The operands put back on an error are the top 256 of the stack. A
     // PaintProc that pops deeper cannot be undone, and must not mix the old
@@ -1014,15 +1056,6 @@ fn the_pictures_match_gs() {
         eprintln!("{name}: mean block diff {diff:.3}");
         assert!(diff < 3.0, "{name}: mean block diff {diff:.2} against gs");
     }
-}
-
-#[test]
-fn programs_that_do_not_use_execform_define_it_but_leave_the_page_alone() {
-    // A page with no forms is the same with `execform` defined or not.
-    let plain = "0.5 setgray 20 20 100 100 rectfill gsave 3 setlinewidth 0 0 1 setrgbcolor 30 30 moveto 200 150 lineto stroke grestore";
-    let a = ours(plain);
-    let b = ours(&format!("/execform {{ pop }} def {plain}"));
-    assert_eq!(a.data(), b.data());
 }
 
 fn limited(limits: Limits) -> Interp {

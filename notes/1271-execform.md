@@ -36,10 +36,17 @@ it. Then the `grestore` operator itself (with its save boundary, so a
 PaintProc's own stray `gsave` or `grestore` does what gs does).
 
 **Errors put everything back.** A failure in the setup, the PaintProc, a
-`stop`, a limit or an abort restores the operands and the graphics state.
-The operands are the top 256 of the stack as `execform` found it, the form
-included. A PaintProc that pops deeper than that cannot be undone; then the
-stack is what it left, never a mix of old and new.
+`stop`, a limit or an abort restores the operands and the graphics state, and
+a refusal for room or limits comes before anything is changed, the form's own
+`/Implementation` included. The operands are the top 256 of the stack as
+`execform` found it, the form included. The copy is put back by cutting the
+stack to the operands under it and putting the copy on top, so it is exact
+unless the PaintProc changed the stack below the copy: one that pops deeper
+and ends shallower than the operands under the copy is left as it left them,
+and one that pops below the copy and pushes the stack back above it ends with
+the first operands it left plus the copy (`tests/execform.rs` pins both). A
+stack of 256 or fewer is always restored whole; nothing cheaper tracks how
+low the PaintProc took the stack between steps.
 
 **Deliberate differences from gs** (not in the table; tests of their own):
 
@@ -66,14 +73,16 @@ stack is what it left, never a mix of old and new.
 **Limits.** At most 64 forms open at once (the depth a pattern's `PaintProc`
 has for captures); the 65th is `execstackoverflow`, as the recursion is in
 gs (at its own 308). Each open form holds a page-sized clip mask: the mask
-is asked of `--max-memory` before it is made, and with a form already open
-the pixels of all the open masks are held to the pattern code's nested bound
-(`limitcheck`), so at 300 and 600 dpi a self-painting form stops after a few
-levels (peak RSS 170 MB and 245 MB) instead of gigabytes. The operand copy,
-the journal's copy of the form dictionary (inside a `save`), the copy of the
-current path the `gsave` makes and the clean-up scan are charged to
-`--max-steps`, `--max-time` and `--max-memory` before they are made, the
-scan in chunks of 1024 operands.
+is asked of `--max-memory` before it is made, and past four forms open the
+pixels of all the open masks are held to the pattern code's nested bound
+(134 million, `limitcheck`). A page is at most 8000 pixels a side (pscat's own
+cap, 64 million pixels), so the floor of four keeps a valid form in a form
+working on any page (four masks are at most 256 MB) and is the most a
+self-painting form is let take. At 300 and 600 dpi it stops after a few levels (peak RSS 170 MB and
+280 MB) instead of gigabytes. The operand copy, the journal's copy of the form
+dictionary (inside a `save`), the copy of the current path the `gsave` makes
+and the clean-up scan are charged to `--max-steps`, `--max-time` and
+`--max-memory` before they are made, the scan in chunks of 1024 operands.
 
 **`Form` category.** `defineresource` with the `Form` category is a
 `typecheck` for a non-dictionary instance, as in gs (`InstanceType

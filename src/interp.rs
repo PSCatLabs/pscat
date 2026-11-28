@@ -383,10 +383,24 @@ pub(crate) struct FormRun {
     keep: usize,
 }
 
-/// How many operands `execform` can put back when its form fails: the top
-/// 256 of the stack. A PaintProc is given the whole stack, as in gs, and
-/// one that pops deeper than this cannot be undone.
+/// How many operands `execform` keeps a copy of, to put back when its form
+/// fails: the top 256 of the stack. A PaintProc is given the whole stack, as
+/// in gs. When a failure comes the first `keep` operands are taken to be
+/// what they were: a PaintProc that pops below the copy and pushes the stack
+/// back above it, or one that changes the operands under the copy and leaves
+/// the stack as deep, is not undone (the stack is cut to `keep` and the copy
+/// put on top of it). One that leaves the stack *shallower* than `keep` is
+/// left as it left it.
 const FORM_KEEP: usize = 256;
+
+/// Forms nested this deep are never refused for the pixels of their clip
+/// masks ([`Interp::check_form_clip`]); deeper ones are held to
+/// [`crate::pattern::MAX_NESTED_PIXELS`] together. A page is at most 8000
+/// pixels a side (64 million), so four masks are at most 256 MB: a form
+/// inside a form (inside a form ...) works on any page pscat makes, and a
+/// form that paints itself is stopped there, where gs's own depth would be
+/// gigabytes.
+const FORM_NESTING_FLOOR: usize = 4;
 
 /// Most forms open at once: a form whose PaintProc paints itself stops here
 /// with `execstackoverflow`, as gs does at its own depth (308 there), and
@@ -3582,20 +3596,35 @@ impl Interp {
     }
 
     /// What the form's `rectclip` is about to make: a page-sized clip mask.
-    /// Refused against `--max-memory` before it is made, and, with a form
-    /// already open, against the pixels the open forms' masks already hold
-    /// (a form that paints itself would otherwise reach gigabytes at a high
-    /// resolution before [`MAX_FORM_DEPTH`] stopped it). The first form is
-    /// never refused for its size: it holds what any `rectclip` holds.
+    /// Refused against `--max-memory` before it is made, and, with more than
+    /// [`FORM_NESTING_FLOOR`] forms open, against the pixels the open forms'
+    /// masks already hold (a form that paints itself would otherwise reach
+    /// gigabytes at a high resolution before [`MAX_FORM_DEPTH`] stopped it).
+    /// The first forms are never refused for their size: each holds what any
+    /// `rectclip` holds.
     pub(crate) fn check_form_clip(&mut self) -> Result<(), PsError> {
         let pixels = u64::from(self.gfx.pixmap.width()) * u64::from(self.gfx.pixmap.height());
-        if self.form_depth > 0
-            && (self.form_depth as u64 + 1).saturating_mul(pixels)
-                > crate::pattern::MAX_NESTED_PIXELS
-        {
+        if Self::nested_forms_too_big(self.form_depth + 1, pixels) {
             return Err(PsError::Limitcheck);
         }
         self.check_alloc(usize::try_from(pixels).unwrap_or(usize::MAX))
+    }
+
+    /// Whether `open` forms, each holding a clip mask of `pixels`, are more
+    /// than a form is let hold: more than [`FORM_NESTING_FLOOR`] of them and
+    /// over [`crate::pattern::MAX_NESTED_PIXELS`] between them.
+    pub(crate) fn nested_forms_too_big(open: usize, pixels: u64) -> bool {
+        open > FORM_NESTING_FLOOR
+            && (open as u64).saturating_mul(pixels) > crate::pattern::MAX_NESTED_PIXELS
+    }
+
+    /// The copy of the operands the form keeps for an error, refused against
+    /// the limits before it is made (and before `execform` changes anything:
+    /// the form gets its `/Implementation` only when nothing can refuse it).
+    pub(crate) fn check_form_operands(&mut self) -> Result<(), PsError> {
+        let take = self.ostack.len().min(FORM_KEEP);
+        self.check_alloc(take * std::mem::size_of::<Object>())?;
+        self.poll_limits((take / 64 + 1) as u64)
     }
 
     /// Run `paintproc` for `form`, which is on top of the operand stack
@@ -3604,22 +3633,17 @@ impl Interp {
     /// frame below it does the rest when it returns ([`Interp::finish_form`])
     /// or is unwound ([`Interp::abort_form`]).
     ///
-    /// A refusal before the frame is on the execution stack (the room, the
-    /// limits, the operand copy) undoes the `gsave` itself and changes
-    /// nothing else; a failure after it is the frame's to clean up.
+    /// A refusal before the frame is on the execution stack undoes the
+    /// `gsave` itself; a failure after it is the frame's to clean up.
     pub(crate) fn begin_form(&mut self, form: Object, paintproc: Object) -> Result<(), PsError> {
         let len = self.ostack.len();
         let take = len.min(FORM_KEEP);
-        let ready = self.form_room().and_then(|()| {
-            if paintproc.executable && paintproc.noaccess {
-                return Err(PsError::InvalidAccess);
-            }
-            self.check_alloc(take * std::mem::size_of::<Object>())?;
-            self.poll_limits((take / 64 + 1) as u64)
-        });
-        if let Err(e) = ready {
+        // Room and the operand copy were asked for before anything changed
+        // (`execform`); an executable string or file with `noaccess` is
+        // refused as `exec` refuses it.
+        if paintproc.executable && paintproc.noaccess {
             self.grestore_form();
-            return Err(e);
+            return Err(PsError::InvalidAccess);
         }
         let saved = self.ostack[len - take..].to_vec();
         self.estack.push(Frame::Form(Box::new(FormRun {
@@ -3658,6 +3682,12 @@ impl Interp {
         let cleaned = self.clean_form_stack();
         if cleaned.is_err() {
             self.restore_form_operands(run);
+            // The operator that ran last is the PaintProc's, not the one
+            // that failed.
+            if self.error_command.is_none() {
+                self.error_command =
+                    Some(Object::exec(Value::Name(crate::name::intern("execform"))));
+            }
         }
         self.grestore_form();
         cleaned.and(self.device_restore_result())
@@ -6801,5 +6831,25 @@ mod tests {
         assert_eq!(err, PsError::Undefined("nosuchname".to_string()));
         let report = it.error_report(&err);
         assert!(report.contains("OffendingCommand: nosuchname"), "{report}");
+    }
+    /// The clip masks of open forms (#1271): a page is at most 8000 pixels a
+    /// side, so the first four forms are never refused for them, and the
+    /// pixel bound is for a form that goes on nesting.
+    #[test]
+    fn nested_forms_are_held_to_the_pixel_bound_only_past_the_floor() {
+        let biggest = 8_000 * 8_000;
+        for open in 1..=FORM_NESTING_FLOOR {
+            assert!(!Interp::nested_forms_too_big(open, biggest), "{open}");
+        }
+        assert!(Interp::nested_forms_too_big(
+            FORM_NESTING_FLOOR + 1,
+            biggest
+        ));
+        // 600 dpi letter, 33.7 MP: four levels are under the 134 MP bound
+        // and a fifth is over it.
+        assert!(!Interp::nested_forms_too_big(4, 5_100 * 6_600));
+        assert!(Interp::nested_forms_too_big(5, 5_100 * 6_600));
+        // 72 dpi: every depth up to the cap fits.
+        assert!(!Interp::nested_forms_too_big(MAX_FORM_DEPTH, 612 * 792));
     }
 }

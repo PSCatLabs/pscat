@@ -13,6 +13,16 @@ static ALLOC: pscat::TrackingAllocator = pscat::TrackingAllocator;
 const FORM: &str =
     "/F << /FormType 1 /BBox [0 0 10 10] /Matrix [2 0 0 2 0 0] /PaintProc {pop} >> def\n";
 
+/// Whether the form `F` has an `/Implementation`, read with no limit.
+fn implementation_known(it: &mut Interp) -> String {
+    it.set_limits(Limits::none()).expect("no limit");
+    it.capture_stdout();
+    it.run_str("F /Implementation known =").expect("known");
+    String::from_utf8_lossy(it.captured_stdout())
+        .trim()
+        .to_string()
+}
+
 /// The operand count, the form's x scale and the `gsave` depth, read with
 /// no limit.
 fn state(it: &mut Interp) -> (usize, i64, usize) {
@@ -43,8 +53,11 @@ fn execform_refuses_what_it_would_allocate_before_it_allocates() {
         Err(PsError::MemoryExceeded),
         "clip mask"
     );
-    // Operands 7 8 and the form, scale 3, nothing left open.
+    // Operands 7 8 and the form, scale 3, nothing left open, and the form
+    // is as it was: a refused `execform` has not given it its
+    // `/Implementation`.
     assert_eq!(state(&mut it), (3, 3, 0));
+    assert_eq!(implementation_known(&mut it), "false", "clip mask");
 
     // The copy of the operands the form keeps for an error: 256 operands
     // are 10 KB here, the limit 4 KB. By then the `gsave`, the `concat` and
@@ -60,6 +73,7 @@ fn execform_refuses_what_it_would_allocate_before_it_allocates() {
         "operand copy"
     );
     assert_eq!(state(&mut it), (301, 3, 0));
+    assert_eq!(implementation_known(&mut it), "false", "operand copy");
 
     // The journal's copy of a big form dictionary, the first write to it in
     // a `save` (the form gets its `/Implementation`).
@@ -77,8 +91,7 @@ fn execform_refuses_what_it_would_allocate_before_it_allocates() {
     let (count, sx, depth) = state(&mut it);
     assert_eq!((sx, depth), (3, 0));
     assert_eq!(count, 1, "the form");
-    it.run_str("F /Implementation known =")
-        .expect("form is intact");
+    assert_eq!(implementation_known(&mut it), "false", "journal");
 
     // The same forms fit when there is room.
     let mut it = Interp::with_page(20, 20).expect("page");

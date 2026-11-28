@@ -1108,8 +1108,11 @@ fn execform(it: &mut Interp) -> Result<(), PsError> {
         return Err(PsError::Undefined("FormType".to_string()));
     }
     // Refused before the `gsave` and the clip mask it will make.
+    // Everything that can be refused for room or limits comes first: a
+    // refused `execform` changes nothing, not even the form.
     it.form_room()?;
     it.check_form_clip()?;
+    it.check_form_operands()?;
     // The `gsave` copies the current path.
     let copy = it.gfx.state().path.copy_bytes();
     it.check_alloc(copy)?;
