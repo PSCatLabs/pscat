@@ -288,13 +288,31 @@ impl crate::Interp {
     /// as the error. The returned page carries the interpreter's resolution.
     /// Not for use while SVG or PDF output is being recorded: those record
     /// drawing operations, not this raster. Inside a pattern's `PaintProc`
-    /// there is no page to exchange and `page` is handed back. While a
+    /// with no page group open there is no page to exchange and `page` is
+    /// handed back (with one open, the page below it is exchanged). While a
     /// transparency group is open (`begingroup`) the canvas is the page
     /// below the group's layer: the exchange swaps that page, and the
     /// group still composites onto it at `endgroup`.
     /// [`open_group_count`](crate::Interp::open_group_count) says whether one is
     /// open, and [`innermost_group_serial`](crate::Interp::innermost_group_serial)
     /// which.
+    ///
+    /// **The 16-bit fill shadow is dropped.** Fills and glyphs that blend
+    /// (translucent ones, among others: see
+    /// [`drop_fill_shadow`](Self::drop_fill_shadow)) composite in 16 bits
+    /// behind the 8-bit canvas, and a swap throws that extra precision away, even when the canvas is swapped out
+    /// and straight back with no pixel changed. Painting after it rounds from
+    /// the 8-bit pixels, which can leave a pixel one level off the same
+    /// painting with no swap: five faint fills (white at alpha 0.02 over
+    /// black), a swap out and back and a sixth fill differ from six fills
+    /// in a row at every pixel of the page, by one level. The shadow
+    /// belongs to the canvas that is exchanged (the page below the outermost
+    /// open group, if one is), and a swap that is refused (wrong size, or
+    /// inside a `PaintProc` with no page group open) leaves it alone. This does not change; a host
+    /// that wants the shadow gone without swapping calls
+    /// [`drop_fill_shadow`](Self::drop_fill_shadow). A swap also cancels the
+    /// erase that `showpage` arms, and marks the page painted; the drop does
+    /// neither.
     ///
     /// ```
     /// use pscat::{Interp, Page};
@@ -318,6 +336,101 @@ impl crate::Interp {
             Ok(old) => Ok(Page::new(old, scale)),
             Err(back) => Err(Page::new(back, given)),
         }
+    }
+
+    /// Drop the 16-bit fill shadow of the canvas (#1506): from here, what
+    /// blends with the canvas (the list below) starts from the canvas's 8-bit
+    /// pixels, as it would on a fresh [`Page`] holding those same pixels. `true` when
+    /// there was a canvas to act on; `false` inside a pattern's `PaintProc`
+    /// with no page group opened before it, where nothing is dropped.
+    ///
+    /// **What the shadow is.** `fill`, `rectfill` and glyphs that blend with
+    /// the canvas composite in 16 bits per channel behind the 8-bit canvas,
+    /// so a stack of faint layers reaches the colour the arithmetic gives
+    /// (1000 fills of white at alpha 0.002 over black reach 221; with the
+    /// shadow dropped before every fill they reach 5). What blends: translucent
+    /// fills and glyphs, Multiply at any alpha, the anti-aliased edge pixels
+    /// of an opaque fill or glyph, and a transparency group's composite at
+    /// `endgroup`. What does not read it: the pixels an opaque Normal fill
+    /// covers entirely, strokes and images, which write the 8-bit canvas only
+    /// and never feed it. The shadow is internal: no pixel shows it, and it is
+    /// not part of a [`Page`].
+    ///
+    /// **Why a host calls this.** [`swap_canvas`](Self::swap_canvas) throws
+    /// the shadow away, so painting after a swap rounds from the 8-bit
+    /// pixels, up to one level off the same painting with no swap. A host
+    /// whose frames must come out the same however they were reached (played
+    /// in order, or sought from a checkpoint, a `Page` rebuilt from 8-bit
+    /// pixels, which has no shadow) calls this at each point the two could
+    /// differ, instead of swapping out and back for the side effect.
+    ///
+    /// **A pure effect on the shadow.** No pixel changes, now or at once
+    /// after: only how a *later* mark that blends (above) rounds, by up to a
+    /// level. Unlike the swap
+    /// trick it does not cancel a `showpage` erase that is armed (the next
+    /// mark still starts a fresh page), and it does not mark the page
+    /// painted. It costs nothing against the limits (no step or memory is
+    /// charged, and the memory the shadow held is freed), it is
+    /// idempotent, and with no shadow (nothing translucent painted yet) it
+    /// does nothing but return `true`. A host that never calls it sees no
+    /// change: [`swap_canvas`](Self::swap_canvas) still clears the shadow, and
+    /// nothing else does what it did not.
+    ///
+    /// **Which shadow, with a group open.** The one `swap_canvas` would clear:
+    /// the canvas is the page below the *outermost* open group
+    /// ([`open_group_count`](Self::open_group_count)), and that page's
+    /// shadow is dropped, however deep inside nested groups the call is
+    /// made. The shadows of the groups' own layers are not touched: the
+    /// layer a program paints on is not the canvas, and a host cannot reach
+    /// it. A group opened while nothing paints (`nulldevice`) has no layer,
+    /// and the canvas is the page itself. At `endgroup` the group
+    /// composites onto the page from the page's shadow where it is kept,
+    /// from the 8-bit pixels where it was dropped, so a drop made in a group
+    /// (or before it) can move that composite by a level.
+    ///
+    /// **Inside a `PaintProc`.** There is no canvas to reach, so it returns
+    /// `false` and drops nothing, as `swap_canvas` hands the page back
+    /// there. If a group was open on the page before the pattern was painted,
+    /// the canvas is that group's page below and it is dropped as above.
+    ///
+    /// Like the rest of the crate API this is Experimental
+    /// (`docs/STABILITY.md`): it can change in any release.
+    ///
+    /// ```
+    /// use pscat::{Interp, Page};
+    /// let build = "0 setgray 0 0 8 8 rectfill 1 setgray 0.02 setalpha
+    ///              0 0 8 8 rectfill 0 0 8 8 rectfill 0 0 8 8 rectfill
+    ///              0 0 8 8 rectfill 0 0 8 8 rectfill ";
+    /// let one_more = "0 0 8 8 rectfill ";
+    ///
+    /// // Painted straight through.
+    /// let mut straight = Interp::with_page(8, 8).expect("valid page size");
+    /// straight.run_str(build)?;
+    /// straight.run_str(one_more)?;
+    ///
+    /// // The same painting with the shadow dropped half way: the pixels at
+    /// // the moment of the call are what they were ...
+    /// let mut dropped = Interp::with_page(8, 8).expect("valid page size");
+    /// dropped.run_str(build)?;
+    /// let before = dropped.canvas_premultiplied_rgba8().to_vec();
+    /// assert!(dropped.drop_fill_shadow());
+    /// assert_eq!(dropped.canvas_premultiplied_rgba8(), &before[..]);
+    /// dropped.run_str(one_more)?;
+    /// // The last fill rounds differently: one level, at every pixel.
+    /// assert_ne!(dropped.canvas_premultiplied_rgba8(), straight.canvas_premultiplied_rgba8());
+    /// assert_eq!(dropped.canvas_premultiplied_rgba8()[0].abs_diff(straight.canvas_premultiplied_rgba8()[0]), 1);
+    ///
+    /// // ... and it is the same as a fresh interpreter handed those pixels.
+    /// let mut fresh = Interp::with_page(8, 8).expect("valid page size");
+    /// let held = Page::from_premultiplied_rgba8(8, 8, before).expect("valid size");
+    /// fresh.swap_canvas(held).expect("same size");
+    /// fresh.run_str("1 setgray 0.02 setalpha")?;
+    /// fresh.run_str(one_more)?;
+    /// assert_eq!(dropped.canvas_premultiplied_rgba8(), fresh.canvas_premultiplied_rgba8());
+    /// # Ok::<(), pscat::PsError>(())
+    /// ```
+    pub fn drop_fill_shadow(&mut self) -> bool {
+        self.gfx_mut().drop_fill_shadow()
     }
 
     /// Paint `page`, a raster the host holds, through the current

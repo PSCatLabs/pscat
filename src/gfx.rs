@@ -5028,7 +5028,8 @@ impl Gfx {
     /// With a transparency group open it is the page below the group's
     /// layer that is exchanged (#1406), so the group still composites
     /// onto the canvas the host handed over. Handed back as the error
-    /// inside a pattern's `PaintProc`, where there is no page to exchange.
+    /// inside a pattern's `PaintProc` with no page group open, where there
+    /// is no page to exchange.
     pub(crate) fn swap_pixmap(&mut self, pixmap: Pixmap) -> Result<Pixmap, Pixmap> {
         let Some((page, deep)) = self.page_slot_mut() else {
             return Err(pixmap);
@@ -5042,6 +5043,22 @@ impl Gfx {
         self.painted_since_page = true;
         self.dirty = true;
         Ok(old)
+    }
+
+    /// Drop the 16-bit shadow of the canvas, the one `swap_pixmap`
+    /// exchanges ([`page_slot_mut`](Self::page_slot_mut)), and nothing else
+    /// (#1506): no pixel changes, and unlike `swap_pixmap` an armed
+    /// `showpage` erase stays armed and the page is not marked painted or
+    /// dirty. `false` where there is no page to reach (inside a pattern's
+    /// `PaintProc` with no page group opened before it): nothing is dropped.
+    pub(crate) fn drop_fill_shadow(&mut self) -> bool {
+        match self.page_slot_mut() {
+            Some((_, deep)) => {
+                deep.clear();
+                true
+            }
+            None => false,
+        }
     }
 
     pub fn erase(&mut self) {
