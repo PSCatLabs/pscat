@@ -1480,6 +1480,12 @@ impl Interp {
         self.decode_budget.set_probe(self.limit_probe());
     }
 
+    /// Whether any directory was allowed for writing (`set_write_roots`):
+    /// `(path) (w) file` can succeed only then.
+    pub(crate) fn can_write_files(&self) -> bool {
+        !self.write_roots.is_empty()
+    }
+
     /// The permanent systemdict.
     pub(crate) fn systemdict(&self) -> Rc<RefCell<Dict>> {
         self.dstack[0].clone()

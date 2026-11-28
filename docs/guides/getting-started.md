@@ -712,7 +712,7 @@ all run, as Ghostscript runs them, with the cheapest honest meaning:
 ```postscript
 << /JobName (poster) /MaxFormItem 50000 >> setuserparams
 currentuserparams /JobName get =        % (poster)
-10000 setcachelimit cachestatus pstack  % 0 1000000 0 200 0 5000 10000
+10000 setcachelimit cachestatus 7 array astore ==   % [0 1000000 0 200 0 5000 10000]
 0.5 setsmoothness true setoverprint     % stored, read back, kept by gsave
 ```
 

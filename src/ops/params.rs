@@ -328,11 +328,15 @@ fn check_value(kind: Kind, obj: &Object, current: &PVal) -> Result<Option<PVal>,
             if obj.noaccess {
                 return Err(PsError::InvalidAccess);
             }
-            let v = PVal::Str(s.to_vec().into());
-            if matches!(kind, Kind::FixedStr) && &v != current {
-                return Err(PsError::InvalidAccess);
+            if matches!(kind, Kind::FixedStr) {
+                // Compared in place: a refusal makes no copy.
+                match current {
+                    PVal::Str(c) if **c == *s.borrow_bytes() => return Ok(None),
+                    _ => return Err(PsError::InvalidAccess),
+                }
             }
-            v
+            // One copy, of the size `check_dict` has already asked for.
+            PVal::Str(Rc::from(&*s.borrow_bytes()))
         }
         Kind::FixedInt => {
             let v = PVal::Int(int(obj)?);
@@ -699,7 +703,7 @@ fn device_of(name: &Object) -> Result<Device, PsError> {
     if name.noaccess {
         return Err(PsError::InvalidAccess);
     }
-    let bytes = s.to_vec();
+    let bytes = s.borrow_bytes();
     let inner = bytes
         .strip_prefix(b"%")
         .map(|b| b.strip_suffix(b"%").unwrap_or(b));
@@ -708,7 +712,9 @@ fn device_of(name: &Object) -> Result<Device, PsError> {
             Ok(Device::Special)
         }
         Some(b"os") => Ok(Device::FileSystem),
-        _ => Err(PsError::Undefined(name.text())),
+        // The name in the error is cut: a program may name a device with a
+        // string of any length.
+        _ => Err(PsError::Undefined(name.text_bounded(256))),
     }
 }
 
@@ -730,7 +736,9 @@ fn currentdevparams(it: &mut Interp) -> Result<(), PsError> {
             ("Removable", Object::bool(false)),
             ("Free", Object::int(1_953_125)),
             ("InitializeAction", Object::int(0)),
-            ("Writeable", Object::bool(false)),
+            // Whether `(path) (w) file` can succeed at all: only inside the
+            // directories `--allow-write` named.
+            ("Writeable", Object::bool(it.can_write_files())),
             ("Mounted", Object::bool(true)),
         ],
     };

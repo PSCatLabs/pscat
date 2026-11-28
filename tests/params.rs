@@ -339,3 +339,68 @@ fn the_cases_agree_with_ghostscript() {
         assert_eq!(got, std::slice::from_ref(want), "{src}");
     }
 }
+
+fn stack(src: &str) -> Vec<String> {
+    let mut it = Interp::with_page(50, 50).expect("test page");
+    it.run_str(src).unwrap_or_else(|e| panic!("{src}: {e:?}"));
+    let mut out = Vec::new();
+    while let Ok(o) = it.pop() {
+        out.push(o.repr());
+    }
+    out.reverse();
+    out
+}
+
+fn error(src: &str) -> String {
+    let mut it = Interp::with_page(50, 50).expect("test page");
+    format!("{:?}", it.run_str(src).expect_err(src)).to_lowercase()
+}
+
+/// pscat only. gs leaves a `true` behind `stackunderflow` for `exitserver`
+/// with no operand (its procedure had pushed one); pscat leaves nothing. The
+/// operator is the `serverdict` entry, not a `systemdict` name.
+#[test]
+fn deviation_exitserver_on_an_empty_stack_leaves_nothing() {
+    assert_eq!(
+        stack("serverdict begin { exitserver } stopped end count"),
+        // `stopped`'s own `true`, and nothing under it (gs: a second `true`).
+        ["true", "1"].map(String::from).to_vec()
+    );
+    assert_eq!(error("exitserver"), "undefined(\"exitserver\")");
+}
+
+/// pscat only. `MaxExecStack` reads pscat's real execution-stack cap, not
+/// gs's 5000, and a program may set it only to that value.
+#[test]
+fn deviation_max_exec_stack_is_the_real_cap() {
+    assert_eq!(
+        stack("currentuserparams /MaxExecStack get"),
+        ["10000"].map(String::from).to_vec()
+    );
+    assert_eq!(
+        stack("<< /MaxExecStack 10000 >> setuserparams currentuserparams /MaxExecStack get"),
+        ["10000"].map(String::from).to_vec()
+    );
+}
+
+/// pscat only. `%os%` is `Writeable` only when a directory was allowed for
+/// writing (`--allow-write`).
+#[test]
+fn deviation_os_is_writeable_only_with_a_write_root() {
+    let probe = "(%os%) currentdevparams /Writeable get";
+    assert_eq!(stack(probe), ["false"].map(String::from).to_vec());
+    let dir = common::scratch_dir("params-write");
+    let mut it = Interp::with_page(50, 50).expect("test page");
+    it.set_write_roots(&[dir]).expect("a write root");
+    it.run_str(probe).unwrap();
+    assert_eq!(it.pop().unwrap().repr(), "true");
+}
+
+/// A device name of any length is looked up without a copy and named in the
+/// error cut short.
+#[test]
+fn a_huge_device_name_is_undefined_with_a_short_name() {
+    let msg = error("/n 1000000 string def n 0 37 put n currentdevparams");
+    assert!(msg.len() < 1000, "{} bytes", msg.len());
+    assert!(msg.starts_with("undefined"), "{msg}");
+}

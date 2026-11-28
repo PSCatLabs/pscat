@@ -2196,7 +2196,8 @@ renders eight examples in both and compares block-downsampled output).
   parameters (`USER`, `SYSTEM`) carry gs's type and range checks; the user set is an
   `Rc<Vec<PVal>>` in `Interp::params` that each `SaveRecord` holds, so `restore` rolls it
   back and a `save` copies nothing. A parameter that would change a limit or reach outside
-  the sandbox is `invalidaccess` unless set to its current value. `setoverprint` and
+  the sandbox is `invalidaccess` (a limit or resource directory unless set to its current value;
+  the file-permission arrays and passwords always). `setoverprint` and
   `setsmoothness` are `GraphicsState` fields (`initgraphics` keeps overprint, resets
   smoothness); `shareddict` is the `globaldict` object. Every operand count and error is
   pinned from gs in `tests/data/params_cases.txt` (`tests/params.rs`, with `DEVIATIONS`).

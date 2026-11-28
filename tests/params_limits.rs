@@ -64,39 +64,55 @@ fn a_deep_stack_under_generous_limits_is_dropped_whole() {
     it.run_str("7 mark 1000000 array aload pop pop pop 500000 100 2000 setcacheparams")
         .expect("within the limits");
     assert_eq!(
-        stack_after(&mut it, "count = cachestatus 7 1 roll pop pop pop pop pop pop ="),
+        stack_after(
+            &mut it,
+            "count = cachestatus 7 1 roll pop pop pop pop pop pop ="
+        ),
         "1\n2000"
     );
 }
 
-/// Steps a program of `n` repeats of `body` takes, less what the same loop
-/// takes with an empty body.
-fn steps_per_call(body: &str, n: u64) -> u64 {
+/// Steps one call of `body` takes beyond `same_shape`, a body of the same
+/// objects with the operator replaced by one that does no work, measured over
+/// `n` repeats.
+fn extra_steps(body: &str, same_shape: &str, n: u64) -> u64 {
     let run = |body: &str| {
         let mut it = Interp::new();
         // Steps are counted only while some limit is set.
         it.set_limits(Limits::none().with_max_steps(u64::MAX / 2))
             .expect("no memory limit");
-        it.run_str(&format!("{n} {{ {body} }} repeat")).expect("runs");
+        it.run_str(&format!("{n} {{ {body} }} repeat"))
+            .expect("runs");
         it.steps_used()
     };
-    (run(body) - run("")) / n
+    (run(body) - run(same_shape)) / n
 }
 
 #[test]
 fn every_parameter_call_is_charged_for_its_table_walk() {
-    // The loop and the operator's own step are two or three; the walk over a
-    // table of twenty or more parameters adds to that. A call that were free
-    // would show as the object count alone.
-    for (body, floor) in [
-        ("currentuserparams pop", 4),
-        ("currentsystemparams pop", 4),
-        ("<< /MaxFormItem 1 >> setuserparams", 4),
-        ("<< /MaxFormCache 1 >> setsystemparams", 4),
-        ("(%os%) currentdevparams pop", 3),
+    // One step per eight table entries, rounded up, beyond the operator's own:
+    // the user table has 20 parameters and 4 refused names, the system table
+    // 35 and 3, `%os%` 11 entries. A call that were free would show 0.
+    for (body, same_shape, floor) in [
+        ("currentuserparams pop", "1 pop", 3),
+        ("currentsystemparams pop", "1 pop", 5),
+        (
+            "<< /MaxFormItem 1 >> setuserparams",
+            "<< /MaxFormItem 1 >> pop",
+            4,
+        ),
+        (
+            "<< /MaxFormCache 1 >> setsystemparams",
+            "<< /MaxFormCache 1 >> pop",
+            5,
+        ),
+        ("(%os%) currentdevparams pop", "(%os%) 1 pop", 2),
     ] {
-        let per = steps_per_call(body, 1000);
-        assert!(per >= floor, "{body}: {per} steps a call");
+        let per = extra_steps(body, same_shape, 1000);
+        assert!(
+            per >= floor,
+            "{body}: {per} extra steps a call, want {floor}"
+        );
     }
 }
 

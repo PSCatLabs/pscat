@@ -7,8 +7,55 @@
 
 use pscat::{Interp, Limits, PsError};
 
+use std::alloc::{GlobalAlloc, Layout};
+use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
+
+/// The tracking allocator, plus the highest live byte count seen since the
+/// last `reset_peak`: a refusal "before the copy is made" is a peak that never
+/// grew by the copy, which a final heap size cannot show (the copy may be
+/// freed again).
+struct Peak;
+static LIVE: AtomicUsize = AtomicUsize::new(0);
+static PEAK: AtomicUsize = AtomicUsize::new(0);
+
+fn grew(n: usize) {
+    let live = LIVE.fetch_add(n, Relaxed) + n;
+    PEAK.fetch_max(live, Relaxed);
+}
+
+unsafe impl GlobalAlloc for Peak {
+    unsafe fn alloc(&self, l: Layout) -> *mut u8 {
+        grew(l.size());
+        unsafe { pscat::TrackingAllocator.alloc(l) }
+    }
+    unsafe fn alloc_zeroed(&self, l: Layout) -> *mut u8 {
+        grew(l.size());
+        unsafe { pscat::TrackingAllocator.alloc_zeroed(l) }
+    }
+    unsafe fn dealloc(&self, p: *mut u8, l: Layout) {
+        LIVE.fetch_sub(l.size(), Relaxed);
+        unsafe { pscat::TrackingAllocator.dealloc(p, l) }
+    }
+    unsafe fn realloc(&self, p: *mut u8, l: Layout, new: usize) -> *mut u8 {
+        LIVE.fetch_sub(l.size(), Relaxed);
+        grew(new);
+        unsafe { pscat::TrackingAllocator.realloc(p, l, new) }
+    }
+}
+
 #[global_allocator]
-static ALLOC: pscat::TrackingAllocator = pscat::TrackingAllocator;
+static ALLOC: Peak = Peak;
+
+/// Forget the peak so far; the next `peak_growth` is measured from here.
+fn reset_peak() -> usize {
+    let live = LIVE.load(Relaxed);
+    PEAK.store(live, Relaxed);
+    live
+}
+
+fn peak_growth(from: usize) -> usize {
+    PEAK.load(Relaxed).saturating_sub(from)
+}
 
 const MIB: usize = 1 << 20;
 
@@ -36,7 +83,15 @@ fn a_string_parameter_is_copied_only_with_room_for_the_copy() {
         "<< /LicenseID big >> setsystemparams",
         "<< /CurInputDevice big >> setsystemparams",
     ] {
+        let from = reset_peak();
         assert_eq!(it.run_str(set), Err(PsError::MemoryExceeded), "{set}");
+        // Refused before the copy: the 8 MiB was never allocated, not
+        // allocated and freed.
+        assert!(
+            peak_growth(from) < MIB,
+            "{set}: peak grew {}",
+            peak_growth(from)
+        );
         // The operand the refusal gave back is the dictionary: the stack is
         // as it was before the operator.
         assert_eq!(
@@ -62,7 +117,12 @@ fn a_string_parameter_is_copied_only_with_room_for_the_copy() {
     // Reading: the string comes back as a fresh copy, refused the same way.
     it.set_limits(Limits::none().with_max_memory(2 * MIB))
         .expect("the allocator is installed");
-    assert_eq!(it.run_str("currentuserparams"), Err(PsError::MemoryExceeded));
+    let from = reset_peak();
+    assert_eq!(
+        it.run_str("currentuserparams"),
+        Err(PsError::MemoryExceeded)
+    );
+    assert!(peak_growth(from) < MIB, "the read made the copy");
     assert_eq!(read_back(&mut it, "count ="), "0", "nothing was pushed");
     it.set_limits(Limits::none().with_max_memory(32 * MIB))
         .expect("the allocator is installed");
