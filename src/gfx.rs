@@ -2071,6 +2071,10 @@ pub struct Gfx {
     next_capture: usize,
     /// Transparency groups open now (#1406), innermost last.
     groups: Vec<Group>,
+    /// Groups ever opened (#1494): the serial of the latest. Kept outside
+    /// everything `save`, `restore` and the page's boundaries touch, so
+    /// no serial repeats.
+    groups_opened: u64,
     /// The time and memory limits for a group that ends with no operator
     /// to charge it (a page boundary, a `restore`, the end of a program):
     /// its composite looks at them as it goes. Set by the interpreter.
@@ -2105,6 +2109,10 @@ struct Group {
     captures: usize,
     /// The SVG and PDF recorders were told about it.
     recorded: bool,
+    /// Which group this is (#1494): the number of groups opened before it,
+    /// counting from 1. Never reused, so a host that saw it can tell the
+    /// same group from a later one at the same depth.
+    serial: u64,
 }
 
 /// Composite one row of a group's layer (`src`) onto the same row of the
@@ -2324,6 +2332,7 @@ impl Gfx {
             captures: Vec::new(),
             next_capture: 0,
             groups: Vec::new(),
+            groups_opened: 0,
             group_probe: crate::limits::LimitProbe::NONE,
             group_work: 0,
         })
@@ -6605,6 +6614,7 @@ impl Gfx {
         self.gsave();
         self.state.alpha = 1.0;
         self.state.blend = BlendMode::Normal;
+        self.groups_opened += 1;
         self.groups.push(Group {
             below,
             comp,
@@ -6612,8 +6622,29 @@ impl Gfx {
             state: Box::new(self.state.clone()),
             captures: self.captures.len(),
             recorded,
+            serial: self.groups_opened,
         });
         Ok(pixels)
+    }
+
+    /// How many transparency groups are open at the page's level (#1494),
+    /// as `begingroup` and `endgroup` count them. The groups of a pattern's
+    /// `PaintProc` (`captures` above 0) are not the page's and are not
+    /// counted, and `endgroup` inside the `PaintProc` cannot close one of
+    /// these. A pure read.
+    pub(crate) fn page_group_count(&self) -> usize {
+        // Groups are pushed in order, so the page's come first.
+        self.groups.iter().take_while(|g| g.captures == 0).count()
+    }
+
+    /// The serial of the innermost group open at the page's level
+    /// (#1494), or `None` with none open.
+    pub(crate) fn innermost_page_group_serial(&self) -> Option<u64> {
+        self.groups
+            .iter()
+            .take_while(|g| g.captures == 0)
+            .last()
+            .map(|g| g.serial)
     }
 
     /// `endgroup`: composite the innermost group opened at this level (the
