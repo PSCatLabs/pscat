@@ -3022,6 +3022,10 @@ renders eight examples in both and compares block-downsampled output).
   prerequisite to a `@requires` line, and a probe name for a new prerequisite
   library to `SENTINELS` in `tests/lib_requires_check.rs`, which checks every
   library's lines against its `@requires` line.
+  The retro bitmap faces (`lib/fonts/{phosphor,pinpoint,diode7,diode5}.ps`)
+  leave exactly one name in the current dictionary, `pf-variant` (#1492):
+  psanim calls it by that name from a private dictionary, so its name, form
+  and place stay; `tests/retro_fonts.rs` checks nothing else leaks.
   drychalk's `dcscratch` private dictionary still pays once the library is
   bound (20% to 30% on its specimen), so it stays. drycrayon and the older
   kits are deliberately unbound: drycrayon gained under 1%, and the rest

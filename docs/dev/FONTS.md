@@ -593,6 +593,14 @@ older display library:
 - **The em is the cell.** FontMatrix is 1/rows, so `rows scalefont` puts one
   font pixel on one unit; at 72 dpi and integer coordinates a square-mark
   glyph is pixel-exact (tested against `/Bitmaps`).
+- **One name left behind (#1492).** The font dict is built anonymously
+  (`40 dict begin ... currentdict end /Name exch definefont pop`), so a file
+  leaves only `pf-variant` in the dictionary current when it runs. psanim's
+  `pixelvariant` calls `pf-variant` by that name from the private dictionary
+  it ran the file in: keep its name, its `/New /Base << dials >>` form and
+  that place. Every face, and every `pf-variant` copy, carries `/FontName`
+  (its registered name). `/Bitmaps /space` is one row of `.` whose length
+  plus `/Gap` is the advance on every face.
 
 All the work is PostScript, so it counts against `--max-steps`,
 `--max-time` and `--max-memory` like any program. `pscat fonts list` now
