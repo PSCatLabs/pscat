@@ -2211,6 +2211,89 @@ fn a_cut_at_a_touch_band_change_leaves_no_ring() {
     }
 }
 
+/// Pixels where two renders of one page differ by more than `over` levels in
+/// any channel.
+fn pixels_over(a: &[u8], b: &[u8], over: u8) -> usize {
+    (0..a.len() / 4)
+        .filter(|&i| {
+            (0..3)
+                .map(|c| a[i * 4 + c].abs_diff(b[i * 4 + c]))
+                .max()
+                .unwrap()
+                > over
+        })
+        .count()
+}
+
+/// Issue #1483, first nitpick of #1478: the overlap run's catch is thinned
+/// from the whole run's stops, not from the tail's own first stop. On a curve
+/// the thinned catch's stops set the knuckles' direction, so a tail thinned
+/// from another stop (an odd index of the earlier run, with the step at 2)
+/// drew its knuckles a little differently from the whole stroke's, up to 46
+/// levels on a pixel at the cut. Now the two pieces match the whole stroke
+/// there.
+#[test]
+fn an_overlap_run_keeps_the_whole_runs_catch() {
+    let path = "newpath 10 12 moveto 35 36 60 -8 91 28 curveto";
+    let opts = "/Width 8 /Touch { 0.4 mul 0.3 add } /Seed 3";
+    let whole = data(&board(
+        100,
+        40,
+        6.0,
+        &format!("{path} << {opts} >> dkstroke"),
+    ));
+    for cut in ["0.50", "0.52"] {
+        let halves = data(&board(
+            100,
+            40,
+            6.0,
+            &format!(
+                "{path} << {opts} /To {cut} >> dkstroke {path} << {opts} /From {cut} >> dkstroke"
+            ),
+        ));
+        let off = pixels_over(&whole, &halves, 32);
+        assert_eq!(
+            off, 0,
+            "cut at {cut}: {off} pixels differ from the whole stroke by over 32"
+        );
+    }
+}
+
+/// Issue #1483, second nitpick of #1478: "within one reach" of the cut is
+/// measured in a straight line, not along the path. On a tight curl (a circle
+/// of 2.5 pt radius under an 8 pt stroke) a band change half a turn further on
+/// is inside one reach by the straight line and outside it along the path.
+/// Measured: counting it as outside (the path test) leaves 30 to 44 pixels
+/// over 32 against the whole stroke at 432 dpi where the straight line leaves
+/// 28 to 33, so the straight line stays. This pins that the overlap on a
+/// curl is no worse than it.
+#[test]
+fn an_overlap_on_a_tight_curl_does_not_make_the_join_worse() {
+    let path = "newpath 40 25 2.5 0 540 arc";
+    let opts = "/Width 8 /Touch { 0.4 mul 0.3 add } /Seed 3";
+    let whole = data(&board(
+        100,
+        50,
+        6.0,
+        &format!("{path} << {opts} >> dkstroke"),
+    ));
+    for cut in ["0.20", "0.24"] {
+        let halves = data(&board(
+            100,
+            50,
+            6.0,
+            &format!(
+                "{path} << {opts} /To {cut} >> dkstroke {path} << {opts} /From {cut} >> dkstroke"
+            ),
+        ));
+        let off = pixels_over(&whole, &halves, 32);
+        assert!(
+            off <= 60,
+            "cut at {cut}: {off} pixels differ from the whole stroke by over 32"
+        );
+    }
+}
+
 /// Issue #1482: a part that reaches a stroke's end ends as the whole stroke
 /// does. When the walk pitch divides a subpath (80 pt at /Width 8, pitch 4),
 /// walkpath's guaranteed end stop repeats the last pitch stop; the whole run
