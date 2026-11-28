@@ -123,50 +123,56 @@ interval.
 
 **End of a run.** A run that ends (finished, error, `quit`, a limit, found
 in the slice or at its start or end) with bytes in the buffer under a time
-limit sends them through the same timed writer the run's writes use: no
-more than the descriptor takes, asking the deadline before the first byte
-and whenever it waits. Nothing predicts whether there is room (Codex
-confirmation round: a room check said "room" for a full macOS socket, and
-`F_GETPIPE_SZ` less `FIONREAD` does too for a Linux pipe whose first page
-was partly read, and the exit flush then hung). Where the send happens:
+limit writes nothing then. It records the deadline the later send of
+those bytes is held to (`timed_write::end_of_run`), and whether the run
+finished. The bytes leave where std's buffer would be flushed, so every
+order against stderr is the plain path's by construction: after an error
+report, `--pstack-on-error`, `--profile`'s table, `--lint`'s verdict,
+`pscat: wrote FILE`, a sweep frame's failure
+(`what_the_cli_prints_after_a_run_keeps_its_place_under_a_time_limit`).
+Those flush points are the CLI's own writes (`stdout_text`,
+`flush_stdout`, through `pscat::hand_over_stdout`), the owner's next plain
+write, and a library user's `Drop`. The send goes through the timed writer
+(no more than the descriptor takes, the deadline asked before the first
+byte and whenever it waits), and past the deadline the rest is dropped.
+Nothing predicts room. (Round 3 tried room checks: a full macOS socket was
+called roomy, and so was a Linux pipe whose first page was partly read, and
+the exit flush hung. Round 3's second try sent the line at the end of a
+finished run, which put it before the `--profile` table; its `-e`/`--png`
+checks used `print`, which flushes, so they tested nothing.)
 
-- In the CLI, a run that finished (or ran `quit`) sends them at once, at
-  its end. Nothing is written between the end of a run and the CLI's next
-  stdout flush (verified with `-e`, a file, the REPL, `--png`, `--profile`,
-  `--lint`), so the order is the same as without a limit. The CLI opts in
-  with `Interp::send_stdout_at_run_end` (doc(hidden)). If the deadline passes first, the
-  rest is dropped and the run reports `limitexceeded (time)`, with the last
-  operator it ran as the offending command
-  (`a_full_pipe_at_the_end_of_a_run_does_not_outlast_the_limit`,
-  `a_full_socket_at_the_end_of_a_run_does_not_outlast_the_limit`). A send
-  that fails (`EPIPE`) keeps the bytes for the CLI's last flush, so the exit
-  is 141 as without a limit; the run is not failed for it.
-- A run that failed reports its error first, and without a limit its
-  partial line leaves after that report, at the CLI's next flush. So the
-  bytes stay in the buffer with the deadline recorded beside them, and that
-  flush (`send_line`: the CLI's, the owner's plain path or `Drop`) is held
-  to it: past it, the rest is dropped and the run keeps its own error
-  (`undefined`, `limitexceeded (steps)`, `limitexceeded (time)`, ...).
-- A library user's finished run does the same: its next program on the
-  same `Interp` may write more to the line, and std would keep it buffered
-  until then (`tests/stdout_owner.rs` pins that). Its next flush (a write,
-  `Drop`) is held to the recorded deadline, and past it the rest is dropped
-  silently: only the CLI reports `limitexceeded (time)` for a finished
-  run.
-- An owner dropped in the middle of a timed run records the deadline in its
-  `Drop`, so that send is bounded too.
+- The CLI's interpreters (`Options::new_interp`: the main run, every sweep
+  frame, every band worker) are marked with `leave_stdout_to_process`:
+  their `Drop` gives the bytes up instead of sending them, as std's buffer
+  outlives an interpreter, and the next frame appends to them or the CLI's
+  next flush sends them. A sweep frame's stdout is the process's stdout,
+  so it is held to the limit like any other.
+- A drop of a finished run's bytes is the run's only sign of the limit.
+  `send_line` notes it (`pscat::stdout_dropped_at_limit`), and `main` ends
+  with `pscat: limitexceeded (time): ...` on stderr and exit 1, after its
+  last flush, which is where the bytes would have left
+  (`a_full_socket_at_the_end_of_a_run_does_not_outlast_the_limit`,
+  `a_sweep_frames_stdout_is_held_to_the_limit_and_a_drop_is_reported`). A
+  run that failed has reported its own error, so its dropped tail is not
+  reported again. A send that fails (`EPIPE`) keeps the bytes for the
+  CLI's last flush, so the exit is 141 as without a limit.
+- A library user's interpreter sends them in its `Drop`, or at its next
+  plain write, held to the deadline; past it they are dropped silently
+  (`tests/stdout_owner.rs` pins the order across several runs on one
+  `Interp`).
 
 The deadline is the run's own, but never less than `END_GRACE` (50 ms) from
 the start of the send. With none, a run stopped by its time limit would
 drop its last partial line before the first byte even to a reader that is
 taking it, where an unlimited run (and the base) delivers it
 (`a_run_stopped_at_its_limit_still_sends_its_last_line_to_a_drained_pipe`).
-50 ms is two polling intervals and scheduling slack, enough for a reader
-that is draining to take std's 1024 bytes, and short against any limit: a
-run stopped by its limit ends at most that much later. With a host
-interrupt flag and no time limit there is no such send: the run returns at
-once, and the bytes wait for the exit flush as without the flag (the writes
-themselves still stop when the flag is raised).
+It also means the CLI's work after a run (writing a large PNG) never
+counts against a line a drained pipe would take at once. 50 ms is two
+polling intervals and scheduling slack, enough for a reader that is
+draining to take std's 1024 bytes, and short against any limit. With a
+host interrupt flag and no time limit nothing is recorded: the bytes wait
+for the exit flush as without the flag (the writes themselves still stop
+when the flag is raised).
 
 **State after a stop.** Bytes already written stay written; a stop in the
 middle of a flush keeps the unwritten part in the buffer as `flush_buf`
@@ -219,18 +225,23 @@ path's.
   its partial line at its next (plain) write, earlier than std would; an
   owner dropped after a failed send gives up the buffer and leaves the bytes
   for the next writer and the CLI's last flush.
-- The send at the end of a run writes what the timed writer can tell fits.
+- The deferred send writes what the timed writer can tell fits.
   On a macOS stream socket that is `poll`'s word, which calls a socket with
   less than 2048 bytes free not writable: a finished run whose socket is
-  nearly full and whose reader reads only after the exit now ends at its
-  limit with the line dropped, where an unlimited run's exit flush would
-  fit it. It is the timed path's rule mid-run too. A Linux pipe
+  nearly full and whose reader reads only after the exit now drops the
+  line and ends with `limitexceeded (time)`, where an unlimited run's exit
+  flush would fit it. It is the timed path's rule mid-run too. A Linux pipe
   (`pwritev2(RWF_NOWAIT)`) and a macOS pipe (`fstat`) are exact
   (`a_nearly_full_pipe_at_the_end_of_a_run_still_takes_the_line`).
 - Bytes still buffered after a timed run are sent at the CLI's flush points
-  and in the owner's `Drop` within the recorded deadline. An owner that
-  never ran under a time limit (an interrupt flag alone) sends them as std's
-  flush does, waiting for the reader.
+  and in a library owner's `Drop` within the recorded deadline. An owner
+  that never ran under a time limit (an interrupt flag alone) sends them as
+  std's flush does, waiting for the reader.
+- The limit for a finished run is reported at the exit, not at the
+  operator: the run itself ended without error. And once the send has
+  dropped the bytes, the CLI's own plain stdout writes that follow (a
+  sweep's progress line, the REPL prompt) still block on a pipe that stays
+  full, as they always did.
 - No test drives a panic: the CLI has no trigger for one. The mechanism is
   `Drop for Interp` running while it unwinds, with a lock that tolerates
   poisoning.

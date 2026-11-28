@@ -292,6 +292,17 @@ pub fn hand_over_stdout() -> std::io::Result<()> {
     Ok(())
 }
 
+/// Whether program stdout a finished timed run left buffered was dropped
+/// because its time limit passed before stdout took it (#1457). The run
+/// itself succeeded, so the CLI reports the limit when it exits.
+#[doc(hidden)]
+pub fn stdout_dropped_at_limit() -> bool {
+    #[cfg(unix)]
+    return timed_write::stdout_dropped_at_limit();
+    #[cfg(not(unix))]
+    false
+}
+
 /// Write what a timed run left in its stdout line buffer, for a thread
 /// about to `process::exit` while the interpreter may be blocked (#1457):
 /// no lock is waited on, and the write waits for room at most one polling

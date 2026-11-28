@@ -408,12 +408,15 @@ struct Line {
     buf: Vec<u8>,
     owner: u64,
     send_by: Option<Instant>,
+    /// The run that recorded `send_by` had finished (see [`end_of_run`]).
+    finished: bool,
 }
 
 static LINE: Mutex<Line> = Mutex::new(Line {
     buf: Vec::new(),
     owner: 0,
     send_by: None,
+    finished: false,
 });
 
 /// The least time a send at or after the end of a run gets, even when the
@@ -464,6 +467,7 @@ fn settle(line: &mut Line) {
     if line.buf.is_empty() {
         line.owner = 0;
         line.send_by = None;
+        line.finished = false;
     }
     OWNER.store(line.owner, Ordering::Relaxed);
 }
@@ -508,6 +512,7 @@ pub(crate) fn line_write(
     line.owner = id;
     // A run is writing: its own deadline governs the buffer again.
     line.send_by = None;
+    line.finished = false;
     let mut out = LineOut {
         buf: &mut line.buf,
         kind,
@@ -611,9 +616,11 @@ impl LineOut<'_, '_> {
 /// CLI's last flush (Codex round 2, R1).
 ///
 /// With no deadline recorded it waits as long as std's flush would. With
-/// one (a timed run that failed and left bytes here, [`end_of_run`]) it
-/// waits until that deadline, but at least [`END_GRACE`] from now, then
-/// drops what is left and returns `Ok`: the run already reported its error.
+/// one (a timed run left bytes here, [`end_of_run`]) it waits until that
+/// deadline, but at least [`END_GRACE`] from now, then drops what is left
+/// and returns `Ok` (a caller such as the CLI's `stdout_text` must not fail
+/// on it): a failed run already reported its error, and a finished run's
+/// drop is noted for [`stdout_dropped_at_limit`].
 ///
 /// `only` limits it to one owner (`Drop`, the plain path); `None` sends
 /// whatever is there (the CLI, which runs one interpreter).
@@ -636,11 +643,15 @@ pub(crate) fn send_line(only: Option<u64>) -> std::io::Result<()> {
             line.buf.clear();
             Ok(())
         }
-        // Past the recorded deadline: what is left is dropped.
+        // Past the recorded deadline: what is left is dropped, and noted
+        // when a finished run left it (the CLI reports the limit at exit).
         Err(Stopped {
             why: WriteStop::Limit(_),
             ..
         }) => {
+            if line.finished {
+                DROPPED_AT_LIMIT.store(true, Ordering::Relaxed);
+            }
             line.buf.clear();
             Ok(())
         }
@@ -670,79 +681,50 @@ pub(crate) fn release(id: u64) {
     }
 }
 
-/// At the end of a run under a time limit, with bytes of `id`'s in the line
-/// buffer: make sure the flush that sends them cannot outlast the limit. No
-/// room is predicted; the bytes go through the timed writer, which writes no
-/// more than the descriptor takes and asks the deadline before the first
-/// byte and whenever it waits. `deadline` is the run's own, but at least
-/// [`END_GRACE`] from now.
+/// At the end of a run under a time limit (or when its interpreter is
+/// dropped), with bytes of `id`'s in the line buffer: record the deadline
+/// the send of them is held to. Nothing is written here and no room is
+/// predicted: they leave where std's buffer would be flushed (the CLI's
+/// flush points, the owner's next plain write or its `Drop`), through the
+/// timed writer, and past the deadline [`send_line`] drops them.
+/// `deadline` is the run's own, but at least [`END_GRACE`] from now (and
+/// the send gets at least that much from its own start).
 ///
-/// - With `finished` (a finished run in the CLI, where nothing else is
-///   written between its end and the next flush, so the order is the same)
-///   they are sent now. If the deadline
-///   passes first, what is left is dropped and the error is
-///   `limitexceeded (time)`, or `Interrupted` if `interrupted` says so. A
-///   write that fails keeps the bytes not written for the CLI's last flush
-///   to report (exit 141), and the run is not failed for it, as without a
-///   limit.
-/// - Otherwise they stay where std would keep them: a run that failed
-///   reports its error first, and its partial line leaves after that report
-///   at the CLI's next flush; a library user's next run or `Drop` sends a
-///   finished run's. The deadline is recorded for [`send_line`] to hold that
-///   flush to.
+/// `finished`: the run finished, so a drop is the run's only sign of the
+/// limit, and [`stdout_dropped_at_limit`] says so for the CLI to report. A
+/// run that failed has reported its own error already.
 ///
-/// Not this interpreter's buffer, or nothing in it: nothing to do.
-pub(crate) fn end_of_run(
-    id: u64,
-    kind: FdKind,
-    finished: bool,
-    deadline: Instant,
-    interrupted: &dyn Fn() -> bool,
-) -> Result<(), PsError> {
+/// `keep`: leave a deadline already recorded (a `Drop` after the run ended).
+pub(crate) fn end_of_run(id: u64, finished: bool, deadline: Instant, keep: bool) {
     if !owned_by(id) {
-        return Ok(());
+        return;
     }
     let deadline = deadline.max(Instant::now() + END_GRACE);
     let mut look = || {
-        if interrupted() {
-            Err(PsError::Interrupted)
-        } else if Instant::now() >= deadline {
+        if Instant::now() >= deadline {
             Err(PsError::TimeExceeded)
         } else {
             Ok(())
         }
     };
-    let mut line = lock_within(&LINE, &mut look)?;
-    if line.owner != id || line.buf.is_empty() {
-        return Ok(());
-    }
-    if !finished {
-        line.send_by = Some(deadline);
-        return Ok(());
-    }
-    let r = match write_all(1, kind, &line.buf, &mut look) {
-        Ok(()) => {
-            line.buf.clear();
-            Ok(())
-        }
-        Err(Stopped {
-            why: WriteStop::Limit(e),
-            ..
-        }) => {
-            line.buf.clear();
-            Err(e)
-        }
-        Err(Stopped {
-            written,
-            why: WriteStop::Io(_),
-        }) => {
-            line.buf.drain(..written);
-            line.send_by = Some(deadline);
-            Ok(())
-        }
+    let Ok(mut line) = lock_within(&LINE, &mut look) else {
+        return;
     };
-    settle(&mut line);
-    r
+    if line.owner != id || line.buf.is_empty() || (keep && line.send_by.is_some()) {
+        return;
+    }
+    line.send_by = Some(deadline);
+    line.finished = finished;
+}
+
+/// Set once [`send_line`] dropped bytes a finished timed run left, because
+/// the deadline passed before stdout took them.
+static DROPPED_AT_LIMIT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Whether a finished timed run's stdout was dropped at its time limit: the
+/// run itself succeeded, so the CLI reports the limit at its exit.
+pub(crate) fn stdout_dropped_at_limit() -> bool {
+    DROPPED_AT_LIMIT.load(Ordering::Relaxed)
 }
 
 /// Write what the line buffer holds for a process about to exit from another

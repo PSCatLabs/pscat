@@ -705,10 +705,10 @@ pub struct Interp {
     /// Set by the CLI's single-run path: dropping this `Interp` leaves the
     /// dictionary graph alone (see `Drop for Interp`).
     keep_dicts_on_drop: bool,
-    /// Set by the CLI: under a time limit, the end of a finished run is a
-    /// flush point for the stdout line buffer (#1457). See
-    /// [`send_stdout_at_run_end`](Interp::send_stdout_at_run_end).
-    send_stdout_at_end: bool,
+    /// Set by the CLI: `Drop` leaves a timed run's buffered stdout to the
+    /// process's own flushes (#1457). See
+    /// [`leave_stdout_to_process`](Interp::leave_stdout_to_process).
+    leave_stdout: bool,
     /// When set, `=`, `==`, `stack`, `pstack` and `print` append here
     /// instead of writing to the process's stdout (issue #252). The
     /// browser build turns it on, since a wasm32 module has no stdout,
@@ -1024,7 +1024,7 @@ impl Interp {
             resources: Default::default(),
             patterns: Default::default(),
             keep_dicts_on_drop: false,
-            send_stdout_at_end: false,
+            leave_stdout: false,
             stdout_capture: None,
             stdout_truncated: false,
             #[cfg(unix)]
@@ -1546,7 +1546,7 @@ impl Interp {
                 Ok(n) => n,
                 Err(e) => {
                     #[cfg(unix)]
-                    let _ = self.stdout_at_end(false);
+                    self.stdout_at_end(false, false);
                     self.snapshot_error_chain(&e);
                     self.unwind_all();
                     return Err(e);
@@ -1576,18 +1576,12 @@ impl Interp {
         if limited {
             result = self.after_slice(result);
         }
-        // The run is over: under a time limit, its buffered stdout is sent
-        // within the limit, not by a flush that could block (#1457). If the
-        // limit passes first, the rest is dropped; a run that had finished
-        // then reports the time limit, while one that already failed keeps
-        // its own error (`undefined`, `limitexceeded (steps)`, ...), which
-        // came first.
+        // The run is over: under a time limit, its buffered stdout is held
+        // to the limit wherever it is sent later, never by a flush that
+        // could block (#1457).
         #[cfg(unix)]
-        if (result.is_err() || matches!(result, Ok(false)) || self.quit_requested)
-            && let Err(e) = self.stdout_at_end(result.is_ok() && self.send_stdout_at_end)
-            && result.is_ok()
-        {
-            result = Err(e);
+        if result.is_err() || matches!(result, Ok(false)) || self.quit_requested {
+            self.stdout_at_end(result.is_ok(), false);
         }
         if result.is_err() || self.quit_requested {
             // Every uncaught error, limits included, passes here with the
@@ -4945,17 +4939,17 @@ impl Interp {
         self.keep_dicts_on_drop = true;
     }
 
-    /// Under a time limit, send a finished run's buffered stdout at the end
-    /// of the run, within the limit, and report `limitexceeded (time)` for
-    /// the run if the limit passes first (#1457). For the `pscat` CLI, where
-    /// nothing is written between a run's end and its next stdout flush, so
-    /// the order is unchanged. Without it (a library user, who may run
-    /// several programs on one `Interp`), the bytes stay buffered as std
-    /// keeps them, and the next flush (a write, `Drop`) is held to the
-    /// run's deadline instead, dropping them silently past it.
+    /// The process sends program stdout a timed run left buffered itself,
+    /// with [`hand_over_stdout`](crate::hand_over_stdout) at its own flush
+    /// points (#1457): dropping this `Interp` then leaves those bytes in the
+    /// shared line buffer, as std's stdout buffer outlives an interpreter,
+    /// instead of sending them. For the `pscat` CLI, whose sweep frames and
+    /// band workers are interpreters that come and go between its flushes.
+    /// Without it (a library user), `Drop` sends them, held to the run's
+    /// deadline.
     #[doc(hidden)]
-    pub fn send_stdout_at_run_end(&mut self) {
-        self.send_stdout_at_end = true;
+    pub fn leave_stdout_to_process(&mut self) {
+        self.leave_stdout = true;
     }
 
     #[doc(hidden)]
@@ -5335,31 +5329,28 @@ impl Interp {
         self.limits.max_time.is_some() || self.interrupt.is_some()
     }
 
-    /// A run that ends with program stdout still in the line buffer
-    /// (#1457): under a time limit, the send of those bytes must not outlast
-    /// it. With `finished` (a finished run in the CLI) they are sent now
-    /// through the timed writer; otherwise (a failed run, whose partial line
-    /// leaves after its error report, or a library user's run) they stay
-    /// for the next flush, held to the same deadline (see
-    /// [`end_of_run`](crate::timed_write::end_of_run)). The deadline is the
-    /// run's, but at least `END_GRACE` (50 ms) from now, so a run stopped at
-    /// its limit still sends its last line to a reader that takes it. Past
-    /// it the bytes are dropped. Only under a time limit: with an interrupt
-    /// flag alone there is no deadline for the exit flush to outlast, and
-    /// the host gets its run back at once.
+    /// A run that ends (or an interpreter dropped) with program stdout
+    /// still in the line buffer (#1457): under a time limit, record the
+    /// deadline its later send is held to. Nothing is sent here, so the
+    /// bytes leave where they would without a limit (after an error report,
+    /// a `--profile` table, and so on). The deadline is the run's, but at
+    /// least `END_GRACE` (50 ms) away, so a run stopped at its limit still
+    /// sends its last line to a reader that takes it; past it the bytes are
+    /// dropped, and for a `finished` run that is noted for the CLI to report
+    /// (see [`end_of_run`](crate::timed_write::end_of_run)). `keep` leaves
+    /// a deadline already recorded. Only under a time limit: with an
+    /// interrupt flag alone there is no deadline to hold the send to.
     #[cfg(unix)]
-    fn stdout_at_end(&self, finished: bool) -> Result<(), PsError> {
+    fn stdout_at_end(&self, finished: bool, keep: bool) {
         let Some(max) = self.limits.max_time else {
-            return Ok(());
+            return;
         };
         if !crate::timed_write::owned_by(self.host_id) {
-            return Ok(());
+            return;
         }
         let used = std::time::Duration::from_millis(self.run_clock.elapsed_ms().max(0) as u64);
         let deadline = std::time::Instant::now() + max.saturating_sub(used);
-        crate::timed_write::end_of_run(self.host_id, self.fd_kind(1), finished, deadline, &|| {
-            self.interrupted()
-        })
+        crate::timed_write::end_of_run(self.host_id, finished, deadline, keep);
     }
 
     /// What fd 1 or fd 2 is this run, looked at once per run.
@@ -5652,15 +5643,18 @@ impl Drop for Interp {
         // dictionary graph would otherwise never be flushed.
         let _ = self.flush_files();
         // Program stdout this interpreter's timed run left in the line
-        // buffer goes now, as std's exit flush would send it (#1457). A run
-        // that ended recorded the deadline this send is held to; one
-        // dropped mid-run under a time limit records it here. Another
-        // interpreter's bytes are not touched. A failure keeps them for the
-        // CLI's last flush to report.
+        // buffer (#1457). A run that ended recorded the deadline its send is
+        // held to; one dropped mid-run under a time limit records it here.
+        // The CLI sends it at its own flush points, as std's buffer would be
+        // flushed there, so the bytes are only given up; a library user's is
+        // sent now. Another interpreter's bytes are not touched. A failure
+        // keeps them for the CLI's last flush to report.
         #[cfg(unix)]
         {
-            let _ = self.stdout_at_end(false);
-            let _ = crate::timed_write::send_line(Some(self.host_id));
+            self.stdout_at_end(false, true);
+            if !self.leave_stdout {
+                let _ = crate::timed_write::send_line(Some(self.host_id));
+            }
             crate::timed_write::release(self.host_id);
         }
         if self.keep_dicts_on_drop {

@@ -337,6 +337,10 @@ impl Options {
         self.check_pixel_cap()?;
         let mut interp = Interp::with_page_scaled(w, h, scale)
             .ok_or_else(|| format!("unusable page size {w}x{h}"))?;
+        // A timed run's buffered stdout leaves at this binary's own flushes
+        // (`stdout_text`, `flush_stdout`), as std's buffer does, not when a
+        // sweep frame's or band worker's interpreter is dropped (#1457).
+        interp.leave_stdout_to_process();
         let gfx = interp.gfx_mut();
         gfx.set_page_origin(self.page_origin.0, self.page_origin.1);
         gfx.set_page_size_source(self.page_source);
@@ -464,6 +468,17 @@ fn main() -> ExitCode {
     flush_stdout();
     if STDOUT_CLOSED.load(std::sync::atomic::Ordering::Relaxed) {
         return ExitCode::from(EXIT_STDOUT_CLOSED);
+    }
+    // A run that finished under `--max-time` with a partial line its stdout
+    // did not take within the limit: the line was dropped where it would
+    // have been flushed, after everything else, so the limit is reported
+    // here (#1457).
+    if pscat::stdout_dropped_at_limit() {
+        eprintln!(
+            "pscat: limitexceeded (time): the program's last stdout bytes were not taken \
+             within --max-time and were dropped"
+        );
+        return ExitCode::FAILURE;
     }
     code
 }
@@ -730,9 +745,6 @@ fn run_cli() -> ExitCode {
         eprintln!("pscat: {msg}");
         return ExitCode::FAILURE;
     }
-    // Nothing writes between a run's end and the next stdout flush here, so
-    // a timed run may send its last partial line at its end (#1457).
-    interp.send_stdout_at_run_end();
     if options.profile {
         interp.enable_profile();
         if options.profile_graph {

@@ -1815,10 +1815,14 @@ renders eight examples in both and compares block-downsampled output).
     keeps std's `LineWriter` rules exactly in `timed_write::LINE` (1024
     bytes, owned by one `Interp` at a time), so `2>&1` order and the operator
     a write error surfaces in are the plain path's; never flush it at a slice
-    end. At the end of a timed run the owner's bytes go through the same timed
-    writer (a finished run sends them then; a failed one records the deadline
-    for the flush after its error report), never a "has room" prediction
-    (the PR #1465 confirmation round found two that were wrong). Anything else that writes to stdout sends it first with
+    end. At the end of a timed run nothing is sent: the deadline is recorded, and
+    the bytes leave at the next flush point through the timed writer, never
+    after a "has room" prediction (the PR #1465 confirmation round found two
+    that were wrong) and never earlier than std would send them (round 4:
+    sending at the run's end put them before `--profile`'s table). The CLI's
+    interpreters (`leave_stdout_to_process`) leave them in the buffer on
+    `Drop`; a finished run's dropped bytes make `main` report
+    `limitexceeded (time)` and exit 1. Anything else that writes to stdout sends it first with
     `pscat::hand_over_stdout()` and passes its error on (the CLI's
     `stdout_text`/`flush_stdout`, the window prompt, bands; the owner's `Drop`
     sends its own). A

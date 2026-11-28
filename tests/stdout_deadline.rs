@@ -813,3 +813,109 @@ fn a_run_stopped_at_its_limit_still_sends_its_last_line_to_a_drained_pipe() {
         assert_eq!(drained.join().expect("the reader"), b"A", "{stdout}");
     }
 }
+
+/// What the CLI writes to stderr after a run (`--profile`'s table, the error
+/// report and `--pstack-on-error`, `--lint`'s verdict, `pscat: wrote FILE`,
+/// `--progress`, a sweep frame's failure and its progress line) comes in the same place against a
+/// run's last unflushed stdout bytes with a time limit as without one. The
+/// tails are `writestring`s with no newline, so they sit in std's buffer
+/// until the CLI flushes it (Codex, round 4 C1: with `--max-time` the tail
+/// came before the profile table at 5be900ef).
+#[test]
+fn what_the_cli_prints_after_a_run_keeps_its_place_under_a_time_limit() {
+    let dir = common::scratch_dir("stdout-deadline-after-run");
+    let png = dir.join("out.png");
+    let png = png.to_str().expect("a UTF-8 path");
+    let sheet = dir.join("sheet.png");
+    let sheet = sheet.to_str().expect("a UTF-8 path");
+    let tail = format!("{FILES}f (TAIL) writestring");
+    let failing = format!("{FILES}f (TAIL) writestring 1 2 nosuchoperator");
+    let sweep_src = dir.join("sweep.ps");
+    std::fs::write(
+        &sweep_src,
+        format!("{FILES}f (T) writestring N 2 eq {{ nosuchoperator }} if"),
+    )
+    .expect("write the sweep program");
+    let sweep_src = sweep_src.to_str().expect("a UTF-8 path");
+    let cases: Vec<Vec<&str>> = vec![
+        vec!["--profile", "-e", &tail],
+        vec!["--profile", "-e", &failing],
+        vec!["--pstack-on-error", "-e", &failing],
+        vec!["--lint", "-e", &tail],
+        vec!["--png", png, "-e", &tail],
+        vec!["--png", png, "-e", &failing],
+        vec!["--progress", "--png", png, "-e", &tail],
+        vec!["--sweep", "N=1,2,3", "--contact-sheet", sheet, sweep_src],
+    ];
+    for args in cases {
+        let plain = merged(&[], &args, b"");
+        let timed = merged(&["--max-time", "60"], &args, b"");
+        assert!(
+            timed.0 == plain.0,
+            "{args:?}\n timed: {:?}\n plain: {:?}",
+            String::from_utf8_lossy(&timed.0),
+            String::from_utf8_lossy(&plain.0)
+        );
+        assert_eq!(timed.1, plain.1, "exit status of {args:?}");
+    }
+}
+
+/// Stdout a pipe that already holds its fill, which the test starts reading
+/// after `drain_after`: returns a stdout for the child and a thread that
+/// gives back everything read.
+fn pipe_drained_after(drain_after: Duration) -> (Stdio, usize, std::thread::JoinHandle<Vec<u8>>) {
+    let (mut reader, mut writer) = std::io::pipe().expect("a pipe for the child's stdout");
+    let prefilled = fill(&mut writer);
+    let drained = std::thread::spawn(move || {
+        std::thread::sleep(drain_after);
+        let mut all = Vec::new();
+        let _ = reader.read_to_end(&mut all);
+        all
+    });
+    (writer.into(), prefilled, drained)
+}
+
+/// A sweep frame's stdout is the process's stdout. A frame that finishes
+/// with a partial line its full pipe does not take within `--max-time` loses
+/// it, and the run says so: `limitexceeded (time)` and exit 1, not a silent
+/// success (Codex, round 4 C2). Within the limit the line arrives and the
+/// sweep succeeds. Either way the sweep's own progress line on stdout
+/// (`pscat: sweep: 1/1 seed=1`), a plain write the reader takes after a
+/// second, follows.
+#[test]
+fn a_sweep_frames_stdout_is_held_to_the_limit_and_a_drop_is_reported() {
+    let dir = common::scratch_dir("stdout-deadline-sweep");
+    let src = dir.join("frame.ps");
+    std::fs::write(&src, "(%stdout) (w) file (A) writestring").expect("write the program");
+    let src = src.to_str().expect("a UTF-8 path");
+    let sheet = dir.join("sheet.png");
+    let sheet = sheet.to_str().expect("a UTF-8 path");
+    for (limit, dropped) in [("0.2", true), ("5", false)] {
+        let (stdout, prefilled, drained) = pipe_drained_after(Duration::from_secs(1));
+        let child = spawn(
+            &[
+                "--sweep-seed",
+                "1",
+                "--max-time",
+                limit,
+                "--contact-sheet",
+                sheet,
+                src,
+            ],
+            stdout,
+            Stdio::piped(),
+        );
+        let out = common::wait_with_deadline(child, GUARD);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        let held = drained.join().expect("the reader");
+        assert!(held[..prefilled].iter().all(|&b| b == b'#'));
+        let after = String::from_utf8_lossy(&held[prefilled..]);
+        if dropped {
+            assert_stopped_by_time("a sweep frame's dropped line", &stderr, out.status.code());
+            assert_eq!(after, "pscat: sweep: 1/1 seed=1\n", "the line was dropped");
+        } else {
+            assert!(out.status.success(), "{limit}: {stderr}");
+            assert_eq!(after, "Apscat: sweep: 1/1 seed=1\n", "{limit}");
+        }
+    }
+}
