@@ -490,7 +490,8 @@ stack to where the group began: with `d` read before `begingroup`, the depth is
 `d + 1` in the body and `d + 1 + k` after the body's `k` unmatched `gsave`s, and `d`
 again after `endgroup`, so a body that left `gsave`s open loses them there (whatever
 else closes the group does the same). A `PaintProc` or a Type 3 `BuildChar` runs one
-level up and drops what it left open when it ends. A caught error does not unwind
+level up and drops what it left open when it ends (but today one that `grestore`s more than
+it `gsave`d pops its caller's levels, which the other landing points do not allow for). A caught error does not unwind
 the stack, and neither does the end of a run or an uncaught error: the next run
 starts from that depth. A read, free against the limits (`notes/1497-gsave-depth.md`).
 

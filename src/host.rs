@@ -1530,8 +1530,8 @@ impl Interp {
     ///
     /// - `gsave` adds one, and `grestore` takes one off. `save` does **not**
     ///   add a level: it records where the stack was and the state, and
-    ///   `restore` goes back to that depth (dropping the levels opened since,
-    ///   and any group, as `grestoreall` to the `save` would).
+    ///   `restore` goes back to that depth, dropping the levels opened since
+    ///   and closing any group opened since.
     /// - `grestore` has three floors. With nothing saved since the innermost
     ///   `save`, it restores that `save`'s state and leaves the depth where
     ///   it is; inside a transparency group it stops at the group's own level
@@ -1544,8 +1544,9 @@ impl Interp {
     ///   stack to the group's level and pops that too, so afterwards it is `d`
     ///   again: the group's level and the `k` levels the body left are gone,
     ///   whether the body balanced its `gsave`s or not. A `grestore` the
-    ///   body did extra cannot go below the group's level, so `endgroup`
-    ///   always lands on the `d` it began at. Whatever else closes a group
+    ///   body did extra stops at the group's level (above), so `endgroup`
+    ///   lands on the `d` it began at, except in a `PaintProc` (below).
+    ///   Whatever else closes a group
     ///   (`erasepage`, `showpage`, `copypage`, a `restore` past it, the end of
     ///   the run, an uncaught error, a limit or the interrupt flag) does the
     ///   same: the depth goes back to the `d` before its `begingroup`.
@@ -1555,9 +1556,19 @@ impl Interp {
     ///   began at, and the host sees the page's levels as well as the
     ///   `PaintProc`'s own (unlike `open_group_count`, which reports the
     ///   page's groups only). When it ends, the levels it left open are
-    ///   dropped: the depth is what it was before the pattern painted. A
-    ///   Type 3 glyph's `BuildChar` or `BuildGlyph` is the same: one level
-    ///   up while it runs, back after it.
+    ///   dropped, so a `PaintProc` that balances its `gsave`s leaves the depth
+    ///   as it was before the pattern painted. A Type 3 glyph's `BuildChar`
+    ///   or `BuildGlyph` is the same: one level up while it runs, back after
+    ///   it. **Today a `PaintProc` or `BuildChar` that `grestore`s more than
+    ///   it `gsave`d is not stopped at its own level**, as a `save` and a
+    ///   group stop one: it pops levels of its caller's (a `PaintProc` even
+    ///   ones below a page group, since a page group is no floor inside it,
+    ///   after which the page's `endgroup` lands below its `d`), and the
+    ///   depth stays lowered after it ends. Ghostscript raises an error there
+    ///   instead. This is the interpreter's current behaviour, not a promise,
+    ///   and a later release may stop at the level; a host that cannot trust
+    ///   its callers' procedures should read the depth again afterwards, not
+    ///   assume the landing points above.
     /// - A caught error (`stopped`) does not unwind: the levels `gsave`d
     ///   before the error stay, exactly as a group stays open. Nothing here
     ///   resets the depth between runs either. A program that finishes or

@@ -38,11 +38,20 @@ host operator mid-run; the numbers are measured, not derived).
   the end is closed (back to `d`). `showpage`, `erasepage`, `initgraphics`,
   `setpagedevice` and `nulldevice` do not move it.
 
-**Observed and not changed (proposed follow-up).** A `PaintProc` that `grestore`s
-more than it `gsave`d pops the page's levels: `gsave gsave gsave` then a pattern
-fill whose `PaintProc` is `{ pop grestore grestore grestore }` reads 3 before, 1
-after (`restore_glyph_snapshot` only truncates, it cannot push back). Ghostscript
-10.07 raises `unknownerror` in `pattern_paint_finish` there. Not pinned by a test.
+**Observed and not changed (proposed follow-up).** A `PaintProc` or Type 3
+`BuildChar` that `grestore`s more than it `gsave`d is not stopped at its own level
+(`glyph_enter`'s level is no floor for `grestore_at`; `group_boundary` needs
+`g.captures == self.captures.len()`, so a page group is no floor inside a
+`PaintProc` either). `restore_glyph_snapshot` only truncates, so it cannot push the
+lost levels back. Measured: `gsave gsave gsave` then a fill with `{ pop grestore
+grestore grestore }` reads 3 before, 1 after; with `gsave << >> begingroup` around
+the fill the depth in the `PaintProc` goes 3 -> 0 and the page's `endgroup` lands at
+0, below its `d` = 1 (`finish_group` skips its truncate once the stack is below the
+group's level); a `BuildChar` with three `grestore`s from depth 3 reads 1 after, but
+stops at a group's level when one is open. Ghostscript 10.07 raises `unknownerror`
+in `pattern_paint_finish` for the `PaintProc` case. Documented on `gsave_depth` as
+today's behaviour; pinned in `an_unbalanced_paintproc_or_buildchar_pops_callers_levels_today`
+so a fix flips it on purpose.
 
 **Cost.** A read of `&self`: no step, time or memory is charged and nothing is
 drawn differently (same `steps_used`, canvas and bytes with 1000 queries per probe,

@@ -32,6 +32,13 @@ fn read(src: &str) -> Vec<usize> {
 const PATTERN: &str = "<< /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 20 20]
         /XStep 20 /YStep 20 /PaintProc { pop BODY } >> matrix makepattern";
 
+/// A Type 3 font `T3` whose `BuildChar` runs `BODY` and has glyph `A`.
+const TYPE3: &str = "/T3 7 dict def T3 begin /FontType 3 def /FontMatrix [0.001 0 0 0.001 0 0] def
+        /FontBBox [0 0 1000 1000] def /Encoding 256 array def
+        0 1 255 { Encoding exch /.notdef put } for Encoding 65 /box put
+        /BuildChar { pop pop BODY 500 0 setcharwidth } def end
+        /T3 T3 definefont pop /T3 findfont 20 scalefont setfont";
+
 fn pattern(body: &str) -> String {
     PATTERN.replace("BODY", body)
 }
@@ -320,6 +327,8 @@ fn the_depth_is_readable_between_slices() {
 /// it ends.
 #[test]
 fn a_paintproc_runs_one_level_up_and_its_leftovers_are_dropped() {
+    // The fill runs its `PaintProc` once (it is run lazily, once per pattern
+    // use: #1341), so the readings are exact.
     let p = pattern("probe gsave probe gsave probe");
     let r = read(&format!(
         "gsave gsave probe {p} setpattern 0 0 30 30 rectfill probe"
@@ -347,14 +356,52 @@ fn a_group_inside_a_paintproc_and_one_around_it() {
     assert_eq!(r, [4, 5, 4, 3, 1]);
 }
 
+/// Today's behaviour, pinned so a fix flips it on purpose (the follow-up
+/// proposed in the PR): a `PaintProc` or `BuildChar` that `grestore`s more
+/// than it `gsave`d is not stopped at its own level. It pops its caller's
+/// levels, even below a page group (a page group is no floor inside a
+/// `PaintProc`), and the page's `endgroup` then lands below its `d`.
+/// Ghostscript raises an error here. `gsave_depth` documents it as not a
+/// promise.
+#[test]
+fn an_unbalanced_paintproc_or_buildchar_pops_callers_levels_today() {
+    let over = "grestore grestore grestore";
+    // PaintProc, no group: 3 before the fill, 1 after.
+    let p = pattern(over);
+    assert_eq!(
+        read(&format!(
+            "gsave gsave gsave probe {p} setpattern 0 0 30 30 rectfill probe"
+        )),
+        [3, 1]
+    );
+    // PaintProc under a page group (d = 1): the PaintProc is at 3, goes to 0,
+    // and the page's `endgroup` lands on 0, not on d.
+    let p = pattern(&format!("probe {over} probe"));
+    assert_eq!(
+        read(&format!(
+            "gsave << >> begingroup {p} setpattern 0 0 30 30 rectfill probe endgroup probe"
+        )),
+        [3, 0, 0, 0]
+    );
+    // BuildChar: from depth 3 it ends at 1; under a group it stops at the
+    // group's level.
+    let t3 = TYPE3.replace("BODY", over);
+    assert_eq!(
+        read(&format!("{t3} gsave gsave gsave 5 5 moveto (A) show probe")),
+        [1]
+    );
+    assert_eq!(
+        read(&format!(
+            "{t3} gsave << >> begingroup 5 5 moveto (A) show probe endgroup probe"
+        )),
+        [2, 1]
+    );
+}
+
 /// A Type 3 glyph's `BuildChar` runs one level up, as a `PaintProc` does.
 #[test]
 fn a_type3_buildchar_runs_one_level_up() {
-    let t3 = "/T3 7 dict def T3 begin /FontType 3 def /FontMatrix [0.001 0 0 0.001 0 0] def
-        /FontBBox [0 0 1000 1000] def /Encoding 256 array def
-        0 1 255 { Encoding exch /.notdef put } for Encoding 65 /box put
-        /BuildChar { pop pop probe gsave probe 500 0 setcharwidth } def end
-        /T3 T3 definefont pop /T3 findfont 20 scalefont setfont";
+    let t3 = TYPE3.replace("BODY", "probe gsave probe");
     let r = read(&format!("{t3} gsave probe 5 5 moveto (A) show probe"));
     // 1 before; BuildChar at 2, a `gsave` in it 3; the glyph's levels are
     // dropped at its end.
