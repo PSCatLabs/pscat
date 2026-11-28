@@ -895,6 +895,9 @@
     /dkFody exch def /dkFodx exch def /dkFoh exch def /dkFoy exch def /dkFox exch def
     /dkFb0 dkFs 0 get def
     /dkFbr dkFb0 2 get dkFhalo add def
+    % (a straight line, not along the path, on purpose (#1483): the whole
+    % stroke layers its levels by place, and a tight curve's overlap that a
+    % path distance would drop joined the pieces no better, measured)
     dkFb0 0 get dkFox sub dup mul dkFb0 1 get dkFoy sub dup mul add sqrt
     dkFbr dkFdp add lt
     % (the earlier run holds the cut when this one starts at or after it)
