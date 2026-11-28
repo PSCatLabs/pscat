@@ -510,20 +510,40 @@ fn a_timed_run_writes_what_an_unlimited_one_does() {
     assert_eq!(drained.join().expect("the reader thread"), plain);
 }
 
+/// Run pscat with `args` and stdout a pipe whose reader is closed before the
+/// spawn, until `seen_closed` accepts the result (at most four tries).
+///
+/// Why more than once: on macOS std makes a pipe with `pipe()` and only then
+/// sets close-on-exec, so a child another test spawns in between inherits
+/// the read end and keeps it open while it runs. The child under test then
+/// writes into a pipe that still has a reader, which looks like a lost
+/// `EPIPE`. A real loss fails every try.
+fn with_closed_stdout(
+    args: &[&str],
+    seen_closed: impl Fn(&std::process::Output) -> bool,
+) -> std::process::Output {
+    let mut last = None;
+    for _ in 0..4 {
+        let (reader, writer) = std::io::pipe().expect("a pipe for the child's stdout");
+        drop(reader);
+        let out = common::wait_with_deadline(spawn(args, writer.into(), Stdio::piped()), GUARD);
+        if seen_closed(&out) {
+            return out;
+        }
+        last = Some(out);
+    }
+    last.expect("at least one run")
+}
+
 /// A reader that went away is still the quiet SIGPIPE exit (#1059) under a
 /// time limit: the timed write reports `EPIPE` as the plain one does. The
 /// reader is closed before the spawn (`notes/1294-closed-stdout-tests.md`).
 #[test]
 fn a_closed_stdout_under_a_time_limit_ends_quietly() {
     for program in ["(x) print", "1048576 string ="] {
-        let (reader, writer) = std::io::pipe().expect("a pipe for the child's stdout");
-        drop(reader);
-        let child = spawn(
-            &["--max-time", "30", "-e", program],
-            writer.into(),
-            Stdio::piped(),
-        );
-        let out = common::wait_with_deadline(child, GUARD);
+        let out = with_closed_stdout(&["--max-time", "30", "-e", program], |out| {
+            out.status.code() == Some(141)
+        });
         let stderr = String::from_utf8_lossy(&out.stderr);
         assert!(stderr.is_empty(), "{program}: {stderr}");
         assert_eq!(
@@ -544,11 +564,9 @@ fn stopped_catches_a_write_error_under_a_time_limit() {
          {{ e (caught) writestring }} {{ e (missed) writestring }} ifelse"
     );
     for flags in [&[][..], &["--max-time", "30"][..]] {
-        let (reader, writer) = std::io::pipe().expect("a pipe for the child's stdout");
-        drop(reader);
         let mut args = flags.to_vec();
         args.extend(["-e", program.as_str()]);
-        let out = common::wait_with_deadline(spawn(&args, writer.into(), Stdio::piped()), GUARD);
+        let out = with_closed_stdout(&args, |out| out.stderr == b"caught");
         let stderr = String::from_utf8_lossy(&out.stderr);
         assert_eq!(stderr, "caught", "{flags:?}");
     }
@@ -566,11 +584,9 @@ fn a_caught_flush_failure_still_fails_the_final_flush() {
     );
     let mut seen = Vec::new();
     for flags in [&[][..], &["--max-time", "30"][..]] {
-        let (reader, writer) = std::io::pipe().expect("a pipe for the child's stdout");
-        drop(reader);
         let mut args = flags.to_vec();
         args.extend(["-e", program.as_str()]);
-        let out = common::wait_with_deadline(spawn(&args, writer.into(), Stdio::piped()), GUARD);
+        let out = with_closed_stdout(&args, |out| out.status.code() == Some(141));
         seen.push((
             String::from_utf8_lossy(&out.stderr).into_owned(),
             out.status.code(),
