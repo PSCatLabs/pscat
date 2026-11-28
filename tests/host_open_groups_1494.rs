@@ -380,6 +380,9 @@ fn asking_costs_no_steps_and_changes_no_pixels() {
     let mut results = Vec::new();
     for ask in [false, true] {
         let mut it = Interp::with_page(40, 40).expect("size");
+        // `steps_used` counts only under limits.
+        it.set_limits(Limits::none().with_max_steps(1_000_000))
+            .expect("limits");
         let asks = Rc::new(Cell::new(0_u32));
         let a = asks.clone();
         it.register_operator("probe", move |i| {
@@ -400,17 +403,25 @@ fn asking_costs_no_steps_and_changes_no_pixels() {
             asks.get(),
         ));
     }
+    assert!(
+        results[0].0 > 20,
+        "the steps are really counted: {}",
+        results[0].0
+    );
     assert_eq!(results[0].0, results[1].0, "steps");
     assert_eq!(results[0].1, results[1].1, "pixels");
     assert_eq!(results[1].2, 3 + 1);
 
     // From Rust, between slices: the step counter does not move.
     let (mut it, _) = interp(20);
+    it.set_limits(Limits::none().with_max_steps(1_000_000))
+        .expect("limits");
     it.begin_source(b"<< >> begingroup 1 1 add pop");
     while it.open_group_count() == 0 {
         it.step_n(1).expect("steps");
     }
     let used = it.steps_used();
+    assert!(used > 0, "the steps are really counted");
     for _ in 0..10_000 {
         std::hint::black_box((it.open_group_count(), it.innermost_group_serial()));
     }
