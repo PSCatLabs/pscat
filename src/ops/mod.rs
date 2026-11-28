@@ -18,6 +18,7 @@ pub mod matrix;
 pub mod misc;
 pub mod noise;
 pub mod pagedevice;
+pub mod params;
 pub mod pdfmark;
 pub mod realsio;
 pub mod shading;
@@ -59,6 +60,7 @@ pub fn install_all(dict: &mut Dict) {
     noise::install(dict);
     crate::kernel::install(dict);
     pagedevice::install(dict);
+    params::install(dict);
     pdfmark::install(dict);
     upath::install(dict);
 

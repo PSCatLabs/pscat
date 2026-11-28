@@ -55,6 +55,10 @@ pub fn install(dict: &mut Dict) {
     op(dict, "currentlinejoin", currentlinejoin);
     op(dict, "currentmiterlimit", currentmiterlimit);
     op(dict, "setstrokeadjust", setstrokeadjust);
+    op(dict, "setoverprint", setoverprint);
+    op(dict, "currentoverprint", currentoverprint);
+    op(dict, "setsmoothness", setsmoothness);
+    op(dict, "currentsmoothness", currentsmoothness);
     op(dict, "currentstrokeadjust", currentstrokeadjust);
     op(dict, "setdash", setdash);
     op(dict, "currentdash", currentdash);
@@ -832,6 +836,40 @@ fn setstrokeadjust(it: &mut Interp) -> Result<(), PsError> {
 fn currentstrokeadjust(it: &mut Interp) -> Result<(), PsError> {
     let b = it.gfx.state().stroke_adjust;
     it.push(Object::bool(b));
+    Ok(())
+}
+
+/// `bool setoverprint -` (#1270). Stored, read back and carried by `gsave`,
+/// `grestore` and gstates; pscat paints no separations, so nothing overprints.
+/// A non-boolean is `typecheck` with the operand left, as in gs.
+fn setoverprint(it: &mut Interp) -> Result<(), PsError> {
+    let obj = it.pop()?;
+    let Value::Boolean(b) = obj.value else {
+        return Err(PsError::Typecheck);
+    };
+    it.gfx.state_mut().overprint = b;
+    Ok(())
+}
+
+fn currentoverprint(it: &mut Interp) -> Result<(), PsError> {
+    let b = it.gfx.state().overprint;
+    it.push(Object::bool(b));
+    Ok(())
+}
+
+/// `number setsmoothness -` (#1270). The value is clamped to 0..1 as gs
+/// clamps it (`2 setsmoothness currentsmoothness` is `1.0`, `-1` is `0.0`),
+/// held as `f32` and read back as that `f32`'s shortest decimal, as the
+/// miter limit is. Stored only: the rasteriser does not use it.
+fn setsmoothness(it: &mut Interp) -> Result<(), PsError> {
+    let s = it.pop_f64()?;
+    it.gfx.state_mut().smoothness = s.clamp(0.0, 1.0) as f32;
+    Ok(())
+}
+
+fn currentsmoothness(it: &mut Interp) -> Result<(), PsError> {
+    let s = it.gfx.state().smoothness;
+    it.push(Object::real(f32_readback(f64::from(s))));
     Ok(())
 }
 

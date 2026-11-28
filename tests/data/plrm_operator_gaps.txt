@@ -8,7 +8,7 @@
 # Decisions where gs and the PLRM disagree (the PLRM decides):
 #  * gs lacks, PLRM lists: the CIDInit, BitmapFontInit, Trapping and ColorRendering procedure-set members, StartData,
 #    UserObjects and exitserver. They are PLRM 8.2 entries but are not systemdict names (a procedure set or userdict
-#    member), so they are `omitted`, except exitserver, which is `missing` (#1270 tracks it; the test probes it in serverdict).
+#    member), so they are `omitted`. exitserver was `missing` until #1270 defined it in serverdict, where the test probes it.
 #  * gs defines, PLRM does not list: 187 non-dot names (command-line switches such as NOPAUSE, the PDF interpreter,
 #    `.`-less extensions such as rsearch, max, min). They are outside the PLRM list, so the test ignores them.
 #  * Names the PLRM index lacks and so needs no entry: Display PostScript extras and the Level 1 statusdict members
@@ -34,29 +34,6 @@ missing	currentundercolorremoval	#1269	black generation, undercolor removal, col
 missing	setcolorrendering	#1269	black generation, undercolor removal, colour rendering
 missing	currentcolorrendering	#1269	black generation, undercolor removal, colour rendering
 missing	findcolorrendering	#1269	black generation, undercolor removal, colour rendering
-missing	setuserparams	#1270	parameter, cache, job-control, overprint and smoothness operators
-missing	currentuserparams	#1270	parameter, cache, job-control, overprint and smoothness operators
-missing	setsystemparams	#1270	parameter, cache, job-control, overprint and smoothness operators
-missing	currentsystemparams	#1270	parameter, cache, job-control, overprint and smoothness operators
-missing	setdevparams	#1270	parameter, cache, job-control, overprint and smoothness operators
-missing	currentdevparams	#1270	parameter, cache, job-control, overprint and smoothness operators
-missing	cachestatus	#1270	parameter, cache, job-control, overprint and smoothness operators
-missing	setcachelimit	#1270	parameter, cache, job-control, overprint and smoothness operators
-missing	setcacheparams	#1270	parameter, cache, job-control, overprint and smoothness operators
-missing	currentcacheparams	#1270	parameter, cache, job-control, overprint and smoothness operators
-missing	setucacheparams	#1270	parameter, cache, job-control, overprint and smoothness operators
-missing	startjob	#1270	parameter, cache, job-control, overprint and smoothness operators
-missing	exitserver	#1270	PLRM puts it in serverdict (probed there by the test), and gs has no systemdict exitserver either; serverdict now exists (#1469) but holds no exitserver
-missing	vmreclaim	#1270	parameter, cache, job-control, overprint and smoothness operators
-missing	setshared	#1270	same as setglobal; PLRM compatibility name
-missing	currentshared	#1270	same as currentglobal; PLRM compatibility name
-missing	ucachestatus	#1270	the PLRM name; #1270's text names currentucacheparams, which is not a PLRM operator, so the issue needs this name added
-missing	setvmthreshold	#1270	named in no issue; same family as vmreclaim, so tracked under #1270 once its text lists it
-missing	shareddict	#1270	same dictionary as globaldict (#1159); PLRM compatibility name
-missing	setoverprint	#1270	parameter, cache, job-control, overprint and smoothness operators
-missing	currentoverprint	#1270	parameter, cache, job-control, overprint and smoothness operators
-missing	setsmoothness	#1270	parameter, cache, job-control, overprint and smoothness operators
-missing	currentsmoothness	#1270	parameter, cache, job-control, overprint and smoothness operators
 missing	execform	#1271	execform
 missing	composefont	#1272	composite fonts
 missing	findencoding	#1272	composite fonts

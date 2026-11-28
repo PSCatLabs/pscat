@@ -48,7 +48,198 @@ fn cases() -> Vec<(String, String)> {
 }
 
 /// `(body, what gs prints, what pscat prints)`.
-const DEVIATIONS: &[(&str, &str, &str)] = &[];
+const DEVIATIONS: &[(&str, &str, &str)] = &[
+    (
+        r#"<< /JobName (abc) >> setuserparams currentuserparams /JobName get wcheck"#,
+        r#"[false null]"#,
+        r#"[true null]"#,
+    ),
+    (
+        r#"<< /JobName (abc) >> setuserparams currentuserparams /JobName get 0 65 put"#,
+        r#"[(abc) 0 65 /invalidaccess]"#,
+        r#"[null]"#,
+    ),
+    (
+        r#"currentsystemparams /PrinterName get wcheck"#,
+        r#"[false null]"#,
+        r#"[true null]"#,
+    ),
+    (
+        r#"<< /PrinterName (pp) >> setsystemparams currentsystemparams /PrinterName get wcheck"#,
+        r#"[false null]"#,
+        r#"[true null]"#,
+    ),
+    (
+        r#"<< /JobName (na) >> noaccess setuserparams"#,
+        r#"[-dict- /invalidaccess]"#,
+        r#"[null]"#,
+    ),
+    (
+        r#"(%os%) 1 dict noaccess setdevparams"#,
+        r#"[(%os%) -dict- /invalidaccess]"#,
+        r#"[null]"#,
+    ),
+    (
+        r#"<< /PermitFileReading [(*)] >> setuserparams"#,
+        r#"[null]"#,
+        r#"[-dict- /invalidaccess]"#,
+    ),
+    (
+        r#"<< /PermitFileWriting [(*)] >> setuserparams"#,
+        r#"[null]"#,
+        r#"[-dict- /invalidaccess]"#,
+    ),
+    (
+        r#"<< /PermitFileControl [(*)] >> setuserparams"#,
+        r#"[null]"#,
+        r#"[-dict- /invalidaccess]"#,
+    ),
+    (
+        r#"<< /LockFilePermissions true >> setuserparams"#,
+        r#"[null]"#,
+        r#"[-dict- /invalidaccess]"#,
+    ),
+    (
+        r#"<< /PermitFileReading 1 >> setuserparams"#,
+        r#"[/typecheck]"#,
+        r#"[-dict- /invalidaccess]"#,
+    ),
+    (
+        r#"<< /MaxOpStack 400000 >> setuserparams"#,
+        r#"[null]"#,
+        r#"[-dict- /invalidaccess]"#,
+    ),
+    (
+        r#"<< /MaxOpStack 1000 >> setuserparams"#,
+        r#"[null]"#,
+        r#"[-dict- /invalidaccess]"#,
+    ),
+    (
+        r#"<< /MaxOpStack 0 >> setuserparams"#,
+        r#"[null]"#,
+        r#"[-dict- /invalidaccess]"#,
+    ),
+    (
+        r#"<< /MaxDictStack 1000 >> setuserparams"#,
+        r#"[null]"#,
+        r#"[-dict- /invalidaccess]"#,
+    ),
+    (
+        r#"<< /MaxDictStack 10 >> setuserparams"#,
+        r#"[null]"#,
+        r#"[-dict- /invalidaccess]"#,
+    ),
+    (
+        r#"<< /MaxExecStack 100000 >> setuserparams"#,
+        r#"[null]"#,
+        r#"[-dict- /invalidaccess]"#,
+    ),
+    (
+        r#"<< /MaxExecStack 100 >> setuserparams"#,
+        r#"[null]"#,
+        r#"[-dict- /invalidaccess]"#,
+    ),
+    (
+        r#"<< /Password 0 >> setsystemparams"#,
+        r#"[null]"#,
+        r#"[-dict- /invalidaccess]"#,
+    ),
+    (
+        r#"<< /Password 0 /MaxFormCache 5 >> setsystemparams"#,
+        r#"[null]"#,
+        r#"[-dict- /invalidaccess]"#,
+    ),
+    (
+        r#"<< /Password () >> setsystemparams"#,
+        r#"[null]"#,
+        r#"[-dict- /invalidaccess]"#,
+    ),
+    (
+        r#"<< /StartJobPassword (x) >> setsystemparams"#,
+        r#"[null]"#,
+        r#"[-dict- /invalidaccess]"#,
+    ),
+    (
+        r#"<< /SystemParamsPassword (x) >> setsystemparams"#,
+        r#"[null]"#,
+        r#"[-dict- /invalidaccess]"#,
+    ),
+    (
+        r#"<< /Password 0 /StartJobPassword (x) /SystemParamsPassword (y) >> setsystemparams"#,
+        r#"[null]"#,
+        r#"[-dict- /invalidaccess]"#,
+    ),
+    (
+        r#"<< /FontResourceDir (/tmp/) >> setsystemparams"#,
+        r#"[null]"#,
+        r#"[-dict- /invalidaccess]"#,
+    ),
+    (
+        r#"<< /GenericResourceDir (/tmp/) >> setsystemparams"#,
+        r#"[null]"#,
+        r#"[-dict- /invalidaccess]"#,
+    ),
+    (
+        r#"<< /GenericResourcePathSep (:) >> setsystemparams"#,
+        r#"[null]"#,
+        r#"[-dict- /invalidaccess]"#,
+    ),
+    (
+        r#"<< /MaxGlobalVM 100 >> setsystemparams"#,
+        r#"[null]"#,
+        r#"[-dict- /invalidaccess]"#,
+    ),
+    (
+        r#"currentuserparams /PermitFileReading known"#,
+        r#"[true null]"#,
+        r#"[false null]"#,
+    ),
+    (
+        r#"currentuserparams /LockFilePermissions known"#,
+        r#"[true null]"#,
+        r#"[false null]"#,
+    ),
+    (
+        r#"<< /MaxOpStack 400000 /MaxFormItem 9 >> { setuserparams } stopped pop currentuserparams /MaxFormItem get"#,
+        r#"[9 null]"#,
+        r#"[-dict- 100000 null]"#,
+    ),
+    (
+        r#"<< /Password (x) /MaxFormCache 5 >> { setsystemparams } stopped pop currentsystemparams /MaxFormCache get"#,
+        r#"[5 null]"#,
+        r#"[-dict- 100000 null]"#,
+    ),
+    (
+        r#"serverdict /exitserver get type"#,
+        r#"[packedarraytype null]"#,
+        r#"[operatortype null]"#,
+    ),
+    (
+        r#"(%os%) << /Foo 1 >> setdevparams"#,
+        r#"[null]"#,
+        r#"[(%os%) -dict- /invalidaccess]"#,
+    ),
+    (
+        r#"(%os%) << /Writeable false >> setdevparams"#,
+        r#"[null]"#,
+        r#"[(%os%) -dict- /invalidaccess]"#,
+    ),
+    (
+        r#"(%os%) << /Mounted false >> setdevparams"#,
+        r#"[null]"#,
+        r#"[(%os%) -dict- /invalidaccess]"#,
+    ),
+    (
+        r#"(%os%) (%os%) currentdevparams setdevparams"#,
+        r#"[null]"#,
+        r#"[(%os%) -dict- /invalidaccess]"#,
+    ),
+    (
+        r#"7 (%os%) << /Foo 1 >> setdevparams count"#,
+        r#"[7 2 null]"#,
+        r#"[7 (%os%) -dict- /invalidaccess]"#,
+    ),
+];
 
 /// The line pscat prints for `src`, in a fresh interpreter.
 fn pscat_line(src: &str) -> String {
@@ -93,9 +284,15 @@ fn every_deviation_names_a_case_and_differs_from_gs() {
 /// process: `save` does not roll those back, and a password set in one case
 /// would refuse the next.
 fn needs_own_process(src: &str) -> bool {
-    ["systemparams", "setcacheparams", "MaxFontCache", "startjob", "exitserver"]
-        .iter()
-        .any(|k| src.contains(k))
+    [
+        "systemparams",
+        "setcacheparams",
+        "MaxFontCache",
+        "startjob",
+        "exitserver",
+    ]
+    .iter()
+    .any(|k| src.contains(k))
 }
 
 fn gs_lines(program: &str) -> Vec<String> {
@@ -103,7 +300,14 @@ fn gs_lines(program: &str) -> Vec<String> {
     let dir = common::scratch_dir("params-gs");
     std::fs::write(dir.join("p.ps"), program).unwrap();
     let out = std::process::Command::new("gs")
-        .args(["-q", "-dNODISPLAY", "-dNOSAFER", "-dBATCH", "-dNOPAUSE", "p.ps"])
+        .args([
+            "-q",
+            "-dNODISPLAY",
+            "-dNOSAFER",
+            "-dBATCH",
+            "-dNOPAUSE",
+            "p.ps",
+        ])
         .current_dir(&dir)
         .output_deadline()
         .unwrap();
@@ -132,6 +336,6 @@ fn the_cases_agree_with_ghostscript() {
     }
     for (src, want) in own {
         let got = gs_lines(&format!("{HARNESS}{{ {src} }} T\n"));
-        assert_eq!(got, [want.clone()], "{src}");
+        assert_eq!(got, std::slice::from_ref(want), "{src}");
     }
 }

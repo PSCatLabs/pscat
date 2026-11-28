@@ -121,7 +121,7 @@ fn version(it: &mut Interp) -> Result<(), PsError> {
 /// dropped, so 0.7.0-rc.4 is 700 like 0.7.0: test `revision 700 ge` for
 /// "0.7.0 or later". Two digits each for minor and patch, which holds
 /// while both stay under 100.
-const REVISION: i64 = {
+pub(crate) const REVISION: i64 = {
     const fn parse(s: &str) -> i64 {
         let b = s.as_bytes();
         let mut n = 0;
