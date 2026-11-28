@@ -481,6 +481,33 @@ while interp.step_n(100)? {}
 assert_eq!(interp.open_group_count(), 0); // the end of the run closed it
 ```
 
+`gsave_depth()` is how many `gsave`s are open now (0 on a fresh interpreter), so a
+host that runs a caller's procedure reads it before and after and knows what the
+procedure left. `save` does not add a level. `grestore` and `grestoreall` stop at
+the innermost `save`'s depth or a group's own level, else at 0, so a difference can
+be negative. `begingroup` takes one level of its own, and `endgroup` truncates the
+stack to where the group began: with `d` read before `begingroup`, the depth is
+`d + 1` in the body and `d + 1 + k` after the body's `k` unmatched `gsave`s, and `d`
+again after `endgroup`, so a body that left `gsave`s open loses them there (whatever
+else closes the group does the same). A `PaintProc` or a Type 3 `BuildChar` runs one
+level up and drops what it left open when it ends. A caught error does not unwind
+the stack, and neither does the end of a run or an uncaught error: the next run
+starts from that depth. A read, free against the limits (`notes/1497-gsave-depth.md`).
+
+```rust
+let mut interp = pscat::Interp::with_page(100, 100).expect("valid page size");
+interp.run_str("gsave")?;
+let before = interp.gsave_depth(); // 1
+interp.begin_source(b"<< >> begingroup gsave gsave");
+while interp.open_group_count() == 0 {
+    interp.step_n(1)?;
+}
+interp.step_n(2)?; // the body's two `gsave`s ...
+assert!(interp.gsave_depth() > before); // ... and the group's own level
+while interp.step_n(100)? {}
+assert_eq!(interp.gsave_depth(), before); // the group's end took them all
+```
+
 **Errors as data.** `error_details` gives the error's name, offending command,
 line and file as fields, and a backtrace: the procedures that were running,
 innermost first, each with the element that was running marked among its
