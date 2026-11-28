@@ -73,9 +73,11 @@ where the path test would not is harmless (a few pixels' rim at most). That is
 also what the geometry says: the shared stop's disc is near the cut in space, and
 the whole stroke's layering there is by space, not by arc length. Kept as is,
 and the comment in `dkFover` says so. Crop:
-`tight-curl-cut0.22.png` (whole stroke, straight-line test, path test; 4x of 432
-dpi). `an_overlap_on_a_tight_curl_does_not_make_the_join_worse` pins it at 60
-pixels over 32 (30 to 33 today, 42 to 44 for the path test).
+`tight-curl-cut0.22.png` (whole stroke, the pieces before and after this change,
+which are byte-identical here, and the path test that was tried; 4x of 432 dpi).
+`an_overlap_on_a_tight_curl_does_not_make_the_join_worse` bounds the pixels over
+32 at 36 (30 and 32 today at cuts 0.20 and 0.24; the path test leaves 42 and 43, and
+fails it).
 
 **Found while measuring (not changed, proposed).** A constant-touch curve drawn in
 two pieces (`/Width 8 /Touch 0.5`, a cubic) shows a seam of 77 levels on 186 to 326
@@ -85,6 +87,12 @@ both the whole stroke and the pieces the same cuts are 33 to 53 levels on 1 to 1
 pixels. So the same phase effect as nitpick 1, on every ordinary part: a cut part's
 catch is thinned from its cut stop, not from the whole run's stops. The overlap
 fix here only covers the overlap's tail.
+
+**Limits of the lattice fix.** A `dkZsplit` half of an overlap run (only after a
+budget split of a chunk) keeps the original `j`, so its second half thins on a stale
+phase: the catch is still a superset, only the knuckle direction is off. And a whole
+stroke long enough for `dkZgroup` to chunk thins per chunk (HANDOFF), so the
+alignment matches the whole stroke only for runs that are not chunked.
 
 **Identity.** The change is in the part branch only: a `/From 0` part and a whole
 stroke never reach `dkFover` (it needs `dkFa` above 0). `scripts/identity_check.sh`

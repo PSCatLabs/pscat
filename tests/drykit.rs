@@ -2263,10 +2263,10 @@ fn an_overlap_run_keeps_the_whole_runs_catch() {
 /// measured in a straight line, not along the path. On a tight curl (a circle
 /// of 2.5 pt radius under an 8 pt stroke) a band change half a turn further on
 /// is inside one reach by the straight line and outside it along the path.
-/// Measured: counting it as outside (the path test) leaves 30 to 44 pixels
+/// Measured: counting it as outside (the path test) leaves 37 to 44 pixels
 /// over 32 against the whole stroke at 432 dpi where the straight line leaves
-/// 28 to 33, so the straight line stays. This pins that the overlap on a
-/// curl is no worse than it.
+/// 28 to 33, so the straight line stays. This bounds the count between the two
+/// (36), so the straight line passes it and the path test does not.
 #[test]
 fn an_overlap_on_a_tight_curl_does_not_make_the_join_worse() {
     let path = "newpath 40 25 2.5 0 540 arc";
@@ -2288,7 +2288,7 @@ fn an_overlap_on_a_tight_curl_does_not_make_the_join_worse() {
         ));
         let off = pixels_over(&whole, &halves, 32);
         assert!(
-            off <= 60,
+            off <= 36,
             "cut at {cut}: {off} pixels differ from the whole stroke by over 32"
         );
     }
