@@ -838,7 +838,8 @@ renders eight examples in both and compares block-downsampled output).
   the gradient itself, or a canvas-sized `<pattern>` with the background,
   `/BBox` clip or a Type 1 image (cut to the canvas it was made on; a use
   in another context or on a canvas of another size makes its own image in
-  `Gfx::pattern_source`, #1368, `ShadingPattern::svg_uses`); PDF a
+  `Gfx::pattern_source`, #1368, `ShadingPattern::svg_uses`; the image
+  `makepattern` made is held to the steps, clock and cap as that one is, #1477); PDF a
   `/PatternType 2` dictionary on the
   shading (`PdfRecorder::shading_pattern`). Patterns of both kinds share
   the registry and `PatternColor` as `pattern::PatternRef`.

@@ -435,6 +435,24 @@ fn fold_offsets(o: i32, len: u32, p: u32) -> Vec<i32> {
     (lo..=hi).map(|k| (o + k * p) as i32).collect()
 }
 
+/// The heap a tile's canvases take, for the limits to look at before they are
+/// made (#1477). `begin` is a capture's start: the capture canvas, the
+/// `/BBox` clip's mask and the coverage mask the first fill makes (a byte a
+/// pixel each), as well as what the end will make. Otherwise only the end's:
+/// the period, and a lattice's oriented cell, which the capture canvas
+/// still being live is already counted in the heap.
+pub(crate) fn cell_bytes(g: &Geometry, begin: bool) -> usize {
+    let px = |(w, h): (u32, u32)| (w as usize).saturating_mul(h as usize);
+    let mut bytes = px(g.period).saturating_mul(4);
+    if let Some(lat) = &g.lattice {
+        bytes = bytes.saturating_add(px(lat.cell).saturating_mul(4));
+    }
+    if begin {
+        bytes = bytes.saturating_add(px(g.content).saturating_mul(4 + 2));
+    }
+    bytes
+}
+
 /// How many copies [`fold`] would draw; refused past
 /// [`MAX_FOLD_COPIES`] before anything is allocated.
 pub(crate) fn check_fold(g: &Geometry) -> Result<(), PsError> {
