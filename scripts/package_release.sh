@@ -221,11 +221,13 @@ done
 # whichever exist on every way out, a `FAIL:` exit included; each variable is
 # set only once its directory exists, and the inline `rm -rf`s still tidy up
 # early on the success path. Only $ARCHIVE under $OUT_BASE is left for the caller.
+# `|| true`: a failing rm must neither skip the other directories nor replace
+# the script's own exit status (the trap runs under `set -e`).
 EMPTY_HOME="" TOOLS="" SYMLINK_DIR=""
 cleanup_scratch() {
   local d
   for d in "$EMPTY_HOME" "$TOOLS" "$SYMLINK_DIR"; do
-    if [[ -n "$d" ]]; then rm -rf "$d"; fi
+    if [[ -n "$d" ]]; then rm -rf "$d" || true; fi
   done
   return 0
 }
