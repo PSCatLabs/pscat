@@ -875,7 +875,7 @@
 % from dkFprev's run at their shared stop: if that stop is within one reach of
 % the /From cut, the earlier run's tail, far enough back for its ink to cover
 % the stop's reach, as an overlap run. Its stops share the flags
-% [f hm cl n cx cy chw dx dy bx by br D side]: f is the earlier run's ink
+% [f hm cl n cx cy chw dx dy bx by br D side j]: f is the earlier run's ink
 % branch plus 16, hm cl n its catch statistics; cx cy chw dx dy the cut point
 % and the direction of the stroke there; bx by br the shared stop and its reach
 % (with the faint level's halo); D how many levels down from the top the
@@ -887,13 +887,17 @@
 % level; side 1 when the stop is after the cut (the
 % overlap lies behind the cut, under this run's round start), -1 before it
 % (ahead of the cut, where the earlier piece's round end lies under this
-% run's), 0 at the cut (both).)
+% run's), 0 at the cut (both); j the tail's first stop's index in the earlier
+% run, so dkZthin keeps the stops the whole run's catch keeps (#1483).)
 % @internal
 /dkFover {
     dkFt0 dkFa 1e-9 sub lt { dkFs } { dkFprev 1 get } ifelse dkFa dkFcutin
     /dkFody exch def /dkFodx exch def /dkFoh exch def /dkFoy exch def /dkFox exch def
     /dkFb0 dkFs 0 get def
     /dkFbr dkFb0 2 get dkFhalo add def
+    % (a straight line, not along the path, on purpose (#1483): the whole
+    % stroke layers its levels by place, and a tight curve's overlap that a
+    % path distance would drop joined the pieces no better, measured)
     dkFb0 0 get dkFox sub dup mul dkFb0 1 get dkFoy sub dup mul add sqrt
     dkFbr dkFdp add lt
     % (the earlier run holds the cut when this one starts at or after it)
@@ -918,6 +922,7 @@
                     dkFox dkFoy dkFoh dkFodx dkFody
                     dkFb0 0 get dkFb0 1 get dkFbr dkFD
                     dkFt0 dkFa 1e-9 add gt { 1 } { dkFt0 dkFa 1e-9 sub lt { -1 } { 0 } ifelse } ifelse
+                    dkFj
             ] def
             dkFprev 2 get
             [ dkFps dkFj dkFps length dkFj sub getinterval { aload pop pop dkFF 4 array astore } forall ]
@@ -1521,8 +1526,18 @@ systemdict /.sameclip known /dkPsameok exch def
         dkZtk 1 eq {
             dkZtr
         } {
-            % kept indices: 0, k, 2k, ..., and the last
-            /dkZti [ 0 dkZtk dkZtn 2 sub { } for dkZtn 1 sub ] def
+            % kept indices: 0, k, 2k, ..., and the last. An overlap run (#1483,
+            % dkFover's flags, 15 of them, the last the tail's first stop's index
+            % in its whole run) keeps the stops the whole run's catch keeps, the
+            % multiples of k in the whole run's count, so its catch is the whole
+            % stroke's there, not one thinned from the tail's own start
+            /dkZti dkZtref null ne { dkZtref length 14 gt } { false } ifelse {
+                /dkZts dkZtk dkZtref 14 get dkZtk mod sub dkZtk mod def
+                dkZts 0 eq { /dkZts dkZtk def } if
+                [ 0 dkZts dkZtk dkZtn 2 sub { } for dkZtn 1 sub ]
+            } {
+                [ 0 dkZtk dkZtn 2 sub { } for dkZtn 1 sub ]
+            } ifelse def
             /dkZtw dkZti length 1 sub array def
             0 1 dkZti length 2 sub {
                 /dkZq exch def

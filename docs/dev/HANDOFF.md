@@ -1368,6 +1368,14 @@ renders eight examples in both and compares block-downsampled output).
    the whole stroke does (ring of up to 82 levels gone; `notes/1444-drykit-band-change-cut.md`).
    Gotcha: `dkrender` leaves an overlap out of the passes it lacks by `dkZp`/`dkZmax`, so
    nothing it calls before that filter may reuse those names.
+   #1483: the overlap's flags end with `j`, the tail's first stop's index in its whole run,
+   and `dkZthin` keeps the whole run's own catch stops (multiples of its step) inside the
+   tail, so the tail's catch is the whole stroke's (it was thinned from the tail's start: up
+   to 46 levels on a pixel on a curve). The "within one reach" test stays a straight
+   line: on a tight curl an along-the-path test joined the pieces worse (30-33 against
+   42-44 pixels over 32). Open: an ordinary `/From a` part has the same thinning phase and
+   a curved constant-touch stroke in two pieces seams at 77 levels on ~200 pixels
+   (`notes/1483-drykit-overlap-nitpicks.md`).
    #1482: walkpath repeats a subpath's last pitch stop when the pitch divides its length
    (a segment of no length); `dkFrun` keeps it in a part that reaches it, because the whole
    run inks that stop twice and pscat's AA counts a coincident disc again (a part used to
