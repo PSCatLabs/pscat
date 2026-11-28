@@ -510,13 +510,27 @@ fn a_layers_own_shadow_is_not_touched() {
     }
 }
 
-/// A group opened while nothing paints has no layer: the canvas is the page.
+/// A group opened while nothing paints has no layer: the canvas is the page,
+/// so the call drops the page's shadow (as the swap trick does), and the
+/// fill painted after the `restore` rounds from the 8-bit pixels. The two
+/// controls differ, so the test cannot pass with the clear skipped.
 #[test]
 fn a_group_opened_after_nulldevice_displaces_nothing() {
-    let (mut it, seen) = new_interp();
-    it.run_str("gsave nulldevice << >> begingroup dropshadow endgroup grestore")
-        .expect("runs");
-    assert_eq!(*seen.borrow(), [(true, true)]);
+    let t = format!(
+        "{BLACK}{} gsave nulldevice << >> begingroup @ endgroup grestore {FILL}",
+        FILL.repeat(5)
+    );
+    let keep = render(&t, Way::Keep).0;
+    let (dropped, seen) = render(&t, Way::Drop);
+    assert_eq!(seen, [(true, true)]);
+    assert_off_by_a_level(&keep, &dropped);
+    assert_eq!(render(&t, Way::Swap).0, dropped, "the swap trick, the same");
+    // The same as dropping before the group.
+    let before = format!(
+        "{BLACK}{} @ gsave nulldevice << >> begingroup endgroup grestore {FILL}",
+        FILL.repeat(5)
+    );
+    assert_eq!(render(&before, Way::Drop).0, dropped);
 }
 
 // --- inside a PaintProc -----------------------------------------------------
