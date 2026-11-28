@@ -704,6 +704,26 @@ The objects live in the `UserObjects` array in `userdict`, which grows as
 needed. An index over 65535 is `rangecheck`, an index never defined holds
 `null`, and the error names and growth are those of Ghostscript.
 
+## Drawing a form more than once
+
+A form is a dictionary with a `/FormType 1`, a `/BBox`, a `/Matrix` and a
+`/PaintProc`. `execform` paints it: it saves the graphics state, applies the
+`/Matrix`, clips to the `/BBox`, runs the `/PaintProc` with the form on the
+stack, and restores the state. Draw the same picture at any size or place by
+moving the page before the call:
+
+```postscript
+/Badge << /FormType 1 /BBox [0 0 40 40] /Matrix [1 0 0 1 0 0]
+  /PaintProc { pop 0.9 0.3 0.1 setrgbcolor 20 20 18 0 360 arc fill } >> def
+gsave  20 20 translate Badge execform grestore
+gsave 100 20 translate 2 2 scale Badge execform grestore
+```
+
+The `/PaintProc` gets the form to `pop` (or `begin`). Anything it draws
+outside the `/BBox` is clipped. `/Badge /Form defineresource` and `/Badge
+/Form findresource` keep a form by name. A form that calls itself stops with
+`execstackoverflow`.
+
 ## Where next
 
 - [Handwriting](handwriting.md): turn a string into a handwriting-style PNG.

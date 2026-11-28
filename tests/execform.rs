@@ -1100,3 +1100,33 @@ fn a_huge_stack_is_scanned_under_the_step_limit_before_the_scan() {
         .expect("a count");
     assert!((2..100).contains(&n), "{n} forms before the limit");
 }
+
+#[test]
+fn the_svg_and_the_pdf_paint_the_form_as_the_png_does() {
+    // The form is painted by the ordinary drawing operators, so the other
+    // outputs carry it too: resvg's raster of the SVG is held against ours.
+    let mut it = Interp::with_page(W, H).expect("page");
+    it.gfx_mut().enable_svg();
+    it.gfx_mut().enable_pdf();
+    it.run_str(&format!("{BADGE}{THREE_SCALES}"))
+        .unwrap_or_else(|e| panic!("run failed: {}", it.error_report(&e)));
+    let png = it.gfx().pixmap.clone();
+    let svg = it.gfx().svg_pages().expect("svg on").remove(0);
+    assert!(!it.gfx().pdf_document().expect("pdf on").is_empty());
+
+    let tree = resvg::usvg::Tree::from_data(svg.as_bytes(), &resvg::usvg::Options::default())
+        .expect("svg");
+    let mut pm = resvg::tiny_skia::Pixmap::new(W, H).expect("pixmap");
+    resvg::render(
+        &tree,
+        resvg::tiny_skia::Transform::from_scale(
+            W as f32 / tree.size().width(),
+            H as f32 / tree.size().height(),
+        ),
+        &mut pm.as_mut(),
+    );
+    let mut theirs = Pixmap::new(W, H).expect("pixmap");
+    theirs.data_mut().copy_from_slice(pm.data());
+    let diff = mean_block_diff(&png, &theirs);
+    assert!(diff < 3.0, "SVG against PNG: mean block diff {diff:.2}");
+}
