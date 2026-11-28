@@ -20,6 +20,14 @@ runs gs too when installed):
 | `(7 8) noaccess token`, `(7 8) noaccess cvx token` | `invalidaccess`, 1 left |
 | `(%stdin) (r) file noaccess 20 string cvs` | works (a file is not read) |
 
+Operand order (Codex round 1, probed against gs over every combination of `1`, `(a)` and
+`(a) noaccess`): a short stack is `stackunderflow` first (`1 search`, `(a) noaccess search`), then each
+operand is checked for its type and then its access in turn. `search` checks its string first and
+the seek second, `anchorsearch` the seek first: `1 (a) noaccess search` is `typecheck` and
+`(a) noaccess 1 search` is `invalidaccess`, and `anchorsearch` is the other way round. `cvs`,
+`cvrs` and `token` already matched gs on the same grid for access (`tests/exec_strings.rs`,
+`search_and_anchorsearch_check_their_operands_in_gs_order`).
+
 Implementation: `cvs` and `cvrs` (`src/ops/convert.rs`) and `pop_string`/`token` (`src/ops/data.rs`)
 raise `InvalidAccess` before any allocation or limit charge, so a refused call costs nothing against
 `--max-steps`/`--max-time`/`--max-memory` (`tests/cvs_limits.rs`); the operand ledger puts the
