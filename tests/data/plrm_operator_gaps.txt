@@ -57,7 +57,6 @@ missing	setoverprint	#1270	parameter, cache, job-control, overprint and smoothne
 missing	currentoverprint	#1270	parameter, cache, job-control, overprint and smoothness operators
 missing	setsmoothness	#1270	parameter, cache, job-control, overprint and smoothness operators
 missing	currentsmoothness	#1270	parameter, cache, job-control, overprint and smoothness operators
-missing	execform	#1271	execform
 missing	composefont	#1272	composite fonts
 missing	findencoding	#1272	composite fonts
 missing	rootfont	#1272	composite fonts

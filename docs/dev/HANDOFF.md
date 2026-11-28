@@ -962,6 +962,14 @@ renders eight examples in both and compares block-downsampled output).
   line; a new gap fails it until it is listed. `languagelevel` stays 2 until no `missing`
   line is left (`notes/1280-plrm-operator-coverage-test.md`).
 
+- `execform` (#1271, `src/ops/graphics.rs`, `Frame::Form` in `src/interp.rs`)
+  paints a `FormType 1` form as Ghostscript's `.execform1` does: `gsave`,
+  `/Matrix`, `/BBox` clip, `/PaintProc` with the form twice on the stack, then
+  gs's clean-up and the `grestore`. A failure puts the operands (the top 256)
+  and the graphics state back; 64 forms open at most. `defineresource` of a
+  `Form` is `typecheck` for a non-dictionary. `notes/1271-execform.md` lists
+  the deliberate differences; `resourceforall` is still #1218.
+
 - `resourcestatus` of a Font (#1214) uses `font::locate`, the lookup
   `findfont` is built on (`font::resolve` = `locate` plus the missing-pack
   stand-in), so the two cannot disagree: not defined but loadable is

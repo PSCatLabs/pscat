@@ -81,6 +81,8 @@ pub fn install(dict: &mut Dict) {
     op(dict, "rectfill", rectfill);
     op(dict, "rectstroke", rectstroke);
     op(dict, "rectclip", rectclip);
+    // Forms (#1271)
+    op(dict, "execform", execform);
     // Clipping
     op(dict, "clip", clip);
     op(dict, "eoclip", eoclip);
@@ -1067,6 +1069,134 @@ fn rectclip(it: &mut Interp) -> Result<(), PsError> {
         }
     }
     Ok(())
+}
+
+/// What the memory limit is asked for each table slot of a form
+/// dictionary's snapshot: the entry, its key and a control byte, doubled for
+/// the load factor.
+const FORM_DICT_SLOT_BYTES: usize = 2 * (std::mem::size_of::<Object>() + 8 + 1);
+
+/// `form execform -` (#1271): paint a form, as the PLRM and Ghostscript do.
+/// Inside a `gsave` it concatenates the form's `/Matrix`, clips to its
+/// `/BBox` (as `rectclip`) and runs its `/PaintProc` with the form
+/// dictionary on the operand stack; the `grestore` comes when the PaintProc
+/// has returned or been unwound ([`Interp::begin_form`]).
+///
+/// The checks run in Ghostscript's order (`.execform1`): `/FormType`
+/// (1, or 1.0), `/Matrix` (six numbers), `/BBox` (four numbers), then
+/// `/PaintProc` (any object: it is `exec`ed), and a form with no
+/// `/Implementation` is given a null one, which the PLRM reserves for the
+/// implementation. An error raised by any of them leaves the operands and
+/// the graphics state as they were; so does one in the PaintProc.
+fn execform(it: &mut Interp) -> Result<(), PsError> {
+    let top = it
+        .operand_stack()
+        .last()
+        .ok_or(PsError::StackUnderflow)?
+        .clone();
+    let Value::Dict(d) = &top.value else {
+        return Err(PsError::Typecheck);
+    };
+    let below = it.operand_stack().len() - 1;
+    let form_type = d.borrow().get("FormType");
+    let one = match form_type.as_ref().map(|o| &o.value) {
+        Some(Value::Integer(1)) => true,
+        Some(Value::Real(r)) => *r == 1.0,
+        _ => false,
+    };
+    if !one {
+        return Err(PsError::Undefined("FormType".to_string()));
+    }
+    // Refused before the `gsave` and the clip mask it will make.
+    // Everything that can be refused for room or limits comes first: a
+    // refused `execform` changes nothing, not even the form.
+    it.form_room()?;
+    it.check_form_clip()?;
+    it.check_form_operands()?;
+    // The `gsave` copies the current path.
+    let copy = it.gfx.state().path.copy_bytes();
+    it.check_alloc(copy)?;
+    it.poll_limits((copy / 16384) as u64)?;
+    it.gfx.gsave();
+    match form_setup(it, d, below) {
+        Ok(paintproc) => it.begin_form(top, paintproc),
+        Err(e) => {
+            it.do_grestore();
+            Err(e)
+        }
+    }
+}
+
+/// The steps of `execform` that change the graphics state or the form, up
+/// to the PaintProc, and the PaintProc.
+fn form_setup(
+    it: &mut Interp,
+    d: &std::rc::Rc<std::cell::RefCell<Dict>>,
+    below: usize,
+) -> Result<Object, PsError> {
+    let get = |key: &str| {
+        d.borrow()
+            .get(key)
+            .ok_or_else(|| PsError::Undefined(key.to_string()))
+    };
+    let matrix = crate::ops::matrix::read_matrix(&get("Matrix")?)?;
+    it.gfx.concat_ctm(matrix);
+    form_clip(it, &get("BBox")?, below)?;
+    let paintproc = get("PaintProc")?;
+    match d.borrow().get("Implementation") {
+        None => {}
+        Some(o) if matches!(o.value, Value::Null) => return Ok(paintproc),
+        // A form with an implementation of its own: gs looks for a cached
+        // form in it. Nothing here makes one.
+        Some(o) if matches!(o.value, Value::Dict(_)) => {
+            return Err(PsError::Undefined("FormID".to_string()));
+        }
+        Some(_) => return Err(PsError::Typecheck),
+    }
+    // The PLRM's private `/Implementation`, put even in a read-only form.
+    // The journal's copy of the dictionary is charged before it is made.
+    let slots = it.dict_snapshot_slots(d);
+    if slots > 0 {
+        it.check_alloc(slots.saturating_mul(FORM_DICT_SLOT_BYTES))?;
+        it.poll_limits((slots / 64 + 1) as u64)?;
+    }
+    it.journal_dict(d);
+    d.borrow_mut()
+        .put("Implementation".into(), Object::lit(Value::Null));
+    Ok(paintproc)
+}
+
+/// Clip to the `/BBox` as gs does: `aload pop exch 3 index sub exch 2 index
+/// sub rectclip`, so `[llx lly urx ury]` is the rectangle `llx lly
+/// (urx-llx) (ury-lly)`. Gs runs that on whatever the array holds, which is
+/// four numbers or an error: a non-array is `typecheck`; an array of two,
+/// three or more than four is `typecheck` (it reaches the form dictionary or
+/// the CTM); one of none or one runs out of operands (`stackunderflow`) when
+/// the stack has fewer than four under the `3 index`, `typecheck` otherwise.
+fn form_clip(it: &mut Interp, bbox: &Object, below: usize) -> Result<(), PsError> {
+    let Value::Array(a) = &bbox.value else {
+        return Err(PsError::Typecheck);
+    };
+    if a.len() != 4 {
+        return Err(if a.len() < 2 && below + 2 + a.len() < 4 {
+            PsError::StackUnderflow
+        } else {
+            PsError::Typecheck
+        });
+    }
+    let mut v = [0.0f64; 4];
+    for (i, slot) in v.iter_mut().enumerate() {
+        *slot = match a.get(i).map(|o| o.value) {
+            Some(Value::Integer(n)) => n as f64,
+            Some(Value::Real(r)) => r,
+            _ => return Err(PsError::Typecheck),
+        };
+    }
+    let [llx, lly, urx, ury] = v;
+    for n in [llx, lly, urx - llx, ury - lly] {
+        it.push(Object::real(n));
+    }
+    rectclip(it)
 }
 
 fn clip(it: &mut Interp) -> Result<(), PsError> {
