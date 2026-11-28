@@ -311,6 +311,10 @@ enum Frame {
     /// put back (`Gfx::abort_pattern`), leaving the pattern to run again at
     /// its next use.
     Pattern(Box<PatternRun>),
+    /// An `execform` PaintProc running (#1271). Reached, the form's work is
+    /// done (the operand clean-up, the `grestore`); unwound, the operands
+    /// the form had come back and so does the graphics state.
+    Form(Box<FormRun>),
     /// `--profile` (issue #737): planted under the body of a procedure
     /// called through a name. Reached, or unwound, it closes that call in
     /// the profiler. Only exists while profiling.
@@ -369,6 +373,30 @@ pub(crate) struct PatternRun {
     /// and the operator finds them as it left them.
     saved: Vec<Object>,
 }
+
+/// An `execform` PaintProc running (#1271).
+pub(crate) struct FormRun {
+    /// The operands as `execform` found them, the form on top, or the top
+    /// [`FORM_KEEP`] of them.
+    saved: Vec<Object>,
+    /// The operand stack's depth under `saved`.
+    keep: usize,
+}
+
+/// How many operands `execform` can put back when its form fails: the top
+/// 256 of the stack. A PaintProc is given the whole stack, as in gs, and
+/// one that pops deeper than this cannot be undone.
+const FORM_KEEP: usize = 256;
+
+/// Most forms open at once: a form whose PaintProc paints itself stops here
+/// with `execstackoverflow`, as gs does at its own depth (308 there), and
+/// as a pattern that names itself does at [`crate::pattern::MAX_CAPTURE_DEPTH`].
+/// Each open form holds a `gsave` level and a page-sized clip.
+const MAX_FORM_DEPTH: usize = 64;
+
+/// How many operands `execform`'s clean-up looks at between two looks at the
+/// limits, and the steps it charges for them.
+const FORM_SCAN_CHUNK: usize = 1024;
 
 /// How many operands under the dictionary a `PaintProc` leaves alone: the
 /// most any marking operator takes (`awidthshow`, `imagemask`).
@@ -702,6 +730,10 @@ pub struct Interp {
         usize,
         (std::rc::Weak<RefCell<Dict>>, crate::pattern::PatternRef),
     >,
+    /// How many `execform` PaintProcs are running (#1271): the open
+    /// [`Frame::Form`]s. Counted up when one is pushed and down when it
+    /// leaves, by completion, a stop or an abort alike.
+    form_depth: usize,
     /// Set by the CLI's single-run path: dropping this `Interp` leaves the
     /// dictionary graph alone (see `Drop for Interp`).
     keep_dicts_on_drop: bool,
@@ -1023,6 +1055,7 @@ impl Interp {
             clock: crate::clock::Clock::start(),
             resources: Default::default(),
             patterns: Default::default(),
+            form_depth: 0,
             keep_dicts_on_drop: false,
             leave_stdout: false,
             stdout_capture: None,
@@ -1881,6 +1914,9 @@ impl Interp {
             Frame::ProfReturn => self.prof_exit(),
             // A PaintProc unwound: the page comes back (#1038).
             Frame::Pattern(_) => self.gfx.abort_pattern(),
+            // An `execform` unwound: the form's operands and graphics state
+            // come back (#1271).
+            Frame::Form(run) => self.abort_form(*run),
             // `begin_eexec` pushes systemdict for the encrypted stream's
             // duration, popped on normal completion via
             // `Action::PopScannerAndDict`; a scanner dropped mid-flight
@@ -2840,6 +2876,8 @@ impl Interp {
             ProfExit,
             /// A pattern's `PaintProc` returned (#1038).
             PatternDone,
+            /// An `execform` PaintProc returned (#1271).
+            FormDone,
             /// A marking glyph step found a current pattern whose
             /// `PaintProc` has not run (#1341): run it, then step again.
             RunPattern(Rc<crate::pattern::LazyPattern>, Object),
@@ -2993,6 +3031,7 @@ impl Interp {
                     Frame::StopMark => Action::PopThenPush(Object::bool(false)),
                     Frame::ProfReturn => Action::ProfExit,
                     Frame::Pattern(_) => Action::PatternDone,
+                    Frame::Form(_) => Action::FormDone,
                     Frame::Show(ctx) => {
                         // A glyph to paint in a pattern whose `PaintProc`
                         // has not run: run it, and this step again after.
@@ -3193,6 +3232,11 @@ impl Interp {
                 Action::PatternDone => {
                     if let Some(Frame::Pattern(run)) = self.estack.pop() {
                         self.finish_pattern(*run)?;
+                    }
+                }
+                Action::FormDone => {
+                    if let Some(Frame::Form(run)) = self.estack.pop() {
+                        self.finish_form(*run)?;
                     }
                 }
                 Action::RunPattern(lazy, dict) => {
@@ -3524,6 +3568,129 @@ impl Interp {
         Ok(())
     }
 
+    // --- execform (#1271) ---------------------------------------------
+
+    /// `execstackoverflow` when another open form would pass
+    /// [`MAX_FORM_DEPTH`] or the execution stack could not hold its two
+    /// frames. Asked before anything is changed: `execform` leaves its
+    /// operands where they were, as gs does.
+    pub(crate) fn form_room(&self) -> Result<(), PsError> {
+        if self.form_depth >= MAX_FORM_DEPTH || self.estack.len() + 2 > EXEC_STACK_LIMIT {
+            return Err(PsError::ExecStackOverflow);
+        }
+        Ok(())
+    }
+
+    /// What the form's `rectclip` is about to make: a page-sized clip mask.
+    /// Refused against `--max-memory` before it is made, and, with a form
+    /// already open, against the pixels the open forms' masks already hold
+    /// (a form that paints itself would otherwise reach gigabytes at a high
+    /// resolution before [`MAX_FORM_DEPTH`] stopped it). The first form is
+    /// never refused for its size: it holds what any `rectclip` holds.
+    pub(crate) fn check_form_clip(&mut self) -> Result<(), PsError> {
+        let pixels = u64::from(self.gfx.pixmap.width()) * u64::from(self.gfx.pixmap.height());
+        if self.form_depth > 0
+            && (self.form_depth as u64 + 1).saturating_mul(pixels)
+                > crate::pattern::MAX_NESTED_PIXELS
+        {
+            return Err(PsError::Limitcheck);
+        }
+        self.check_alloc(usize::try_from(pixels).unwrap_or(usize::MAX))
+    }
+
+    /// Run `paintproc` for `form`, which is on top of the operand stack
+    /// with its `gsave`, `concat` and `rectclip` already done (`execform`).
+    /// The PaintProc is given the form twice, as gs gives it, and the form
+    /// frame below it does the rest when it returns ([`Interp::finish_form`])
+    /// or is unwound ([`Interp::abort_form`]).
+    ///
+    /// A refusal before the frame is on the execution stack (the room, the
+    /// limits, the operand copy) undoes the `gsave` itself and changes
+    /// nothing else; a failure after it is the frame's to clean up.
+    pub(crate) fn begin_form(&mut self, form: Object, paintproc: Object) -> Result<(), PsError> {
+        let len = self.ostack.len();
+        let take = len.min(FORM_KEEP);
+        let ready = self.form_room().and_then(|()| {
+            if paintproc.executable && paintproc.noaccess {
+                return Err(PsError::InvalidAccess);
+            }
+            self.check_alloc(take * std::mem::size_of::<Object>())?;
+            self.poll_limits((take / 64 + 1) as u64)
+        });
+        if let Err(e) = ready {
+            self.grestore_form();
+            return Err(e);
+        }
+        let saved = self.ostack[len - take..].to_vec();
+        self.estack.push(Frame::Form(Box::new(FormRun {
+            saved,
+            keep: len - take,
+        })));
+        self.form_depth += 1;
+        self.push(form);
+        self.exec_object(paintproc)
+    }
+
+    /// The form's own `grestore`: the operator, with its save boundary.
+    fn grestore_form(&mut self) {
+        self.do_grestore();
+    }
+
+    /// Put the operands the form had back, when the PaintProc has left the
+    /// stack as deep as the operands under the ones saved.
+    fn restore_form_operands(&mut self, run: FormRun) {
+        if self.ostack.len() >= run.keep {
+            self.ostack.truncate(run.keep);
+            self.ostack.extend(run.saved);
+        }
+    }
+
+    /// The PaintProc returned. gs's clean-up of what it left: scan down from
+    /// the top for the first dictionary with an `/Implementation` (the form,
+    /// which `execform` gave one), and remove it and everything above it;
+    /// with none, remove the top operand. A PaintProc that took the form it
+    /// was given leaves the second copy, and that is removed. Then the
+    /// `grestore`. A stop in the scan (the limits look at it every
+    /// [`FORM_SCAN_CHUNK`] operands, before the chunk is read) or an empty
+    /// stack puts the form's operands back first.
+    fn finish_form(&mut self, run: FormRun) -> Result<(), PsError> {
+        self.form_depth -= 1;
+        let cleaned = self.clean_form_stack();
+        if cleaned.is_err() {
+            self.restore_form_operands(run);
+        }
+        self.grestore_form();
+        cleaned.and(self.device_restore_result())
+    }
+
+    fn clean_form_stack(&mut self) -> Result<(), PsError> {
+        self.poll_limits(1)?;
+        let mut at = self.ostack.len();
+        let mut since = 0;
+        while at > 0 {
+            if since == FORM_SCAN_CHUNK {
+                self.poll_limits((FORM_SCAN_CHUNK / 64) as u64)?;
+                since = 0;
+            }
+            at -= 1;
+            since += 1;
+            if let Value::Dict(d) = &self.ostack[at].value
+                && d.borrow().get("Implementation").is_some()
+            {
+                self.ostack.truncate(at);
+                return Ok(());
+            }
+        }
+        self.ostack.pop().map(drop).ok_or(PsError::StackUnderflow)
+    }
+
+    /// A form's frame was unwound (an error, `stop`, `quit` or a limit).
+    fn abort_form(&mut self, run: FormRun) {
+        self.form_depth -= 1;
+        self.restore_form_operands(run);
+        self.grestore_form();
+    }
+
     /// The pattern `makepattern` made for `d`, if it made one.
     pub(crate) fn pattern_lazy(&self, d: &Rc<RefCell<Dict>>) -> Option<crate::pattern::PatternRef> {
         self.patterns
@@ -3832,7 +3999,8 @@ impl Interp {
                     | Frame::Show(_)
                     | Frame::Image(_)
                     | Frame::PostOp(_)
-                    | Frame::Pattern(_),
+                    | Frame::Pattern(_)
+                    | Frame::Form(_),
                 ) => {
                     return Err(PsError::InvalidExit);
                 }
@@ -5926,6 +6094,7 @@ fn frame_shape(frame: &Frame) -> (usize, usize) {
         | Frame::Image(_)
         | Frame::PostOp(_)
         | Frame::Pattern(_)
+        | Frame::Form(_)
         | Frame::ProfReturn => (0, 0),
     }
 }
@@ -6012,6 +6181,7 @@ fn frame_entries(
         | Frame::Image(_)
         | Frame::PostOp(_)
         | Frame::Pattern(_)
+        | Frame::Form(_)
         | Frame::ProfReturn => Ok(()),
     }
 }

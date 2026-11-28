@@ -166,6 +166,11 @@ fn defineresource(it: &mut Interp) -> Result<(), PsError> {
     }
     let instance = it.pop()?;
     let key = it.pop()?;
+    // A Form is a dictionary (`/InstanceType /dicttype`, #1271). The
+    // operands are put back by the ledger.
+    if &*category == "Form" && !matches!(instance.value, Value::Dict(_)) {
+        return Err(PsError::Typecheck);
+    }
     let d = it.resource_category(&category);
     it.journal_dict(&d);
     d.borrow_mut().put_obj(&key, instance.clone())?;

@@ -717,15 +717,14 @@ fn a_paintproc_that_pops_past_the_saved_operands_leaves_the_stack_it_left() {
     // The operands put back on an error are the top 256 of the stack. A
     // PaintProc that pops deeper cannot be undone, and must not mix the old
     // operands into what is left: the stack is what the PaintProc left.
-    let out = printed(&format!(
-        "{F} 300 {{ 7 }} repeat F {{ 290 {{ pop }} repeat 1 0 div }} \
-         /PaintProc exch 1 index exch put /G exch def 300 {{ 7 }} repeat G {{ execform }} stopped \
-         {{ (stopped ) print }} if count ="
-    ));
-    // 300 sevens and the form, then `290 pops` and a failing div.
-    assert!(out.starts_with("stopped "), "{out}");
-    let n: usize = out["stopped ".len()..].trim().parse().expect("a count");
-    assert!(n >= 10, "{out}");
+    let out = printed(
+        "/G << /FormType 1 /BBox [0 0 10 10] /Matrix [1 0 0 1 0 0] \
+            /PaintProc { 290 { pop } repeat 1 0 div } >> def \
+         300 { 7 } repeat G { execform } stopped { (stopped ) print } if \
+         count =only ( ) print 0 eq exch 1 eq and =",
+    );
+    // 302 operands (the form twice), 290 popped, the `div`'s two put back by `div` itself.
+    assert_eq!(out, "stopped 14 true\n");
 }
 
 #[test]
@@ -784,7 +783,8 @@ fn a_loop_of_forms_with_exit_around_it_is_invalid_exit_inside() {
 #[test]
 fn a_form_leaves_the_graphics_state_as_it_found_it() {
     let out = printed(
-        "matrix setmatrix 0.25 setgray 3 setlinewidth [4 2] 1 setdash 10 10 moveto 50 50 lineto \
+        "/pm { matrix currentmatrix { cvi 6 string cvs print ( ) print } forall } def \
+         matrix setmatrix 0.25 setgray 3 setlinewidth [4 2] 1 setdash 10 10 moveto 50 50 lineto \
          /F << /FormType 1 /BBox [0 0 10 10] /Matrix [2 0 0 2 5 5] \
             /PaintProc { pop 1 0 0 setrgbcolor 9 setlinewidth [] 0 setdash 1 1 translate \
                          newpath 0 0 5 5 rectfill 7 7 moveto } >> def \
@@ -1027,15 +1027,26 @@ fn a_stop_inside_the_paintproc_gives_back_the_state_and_the_operands() {
 
 #[test]
 fn a_huge_stack_is_scanned_under_the_step_limit_before_the_scan() {
-    // A PaintProc that leaves a hundred thousand operands and no form makes
-    // gs scan them all for the form; the scan is charged to --max-steps
-    // before it is made, so a program cannot make it free.
+    // A PaintProc that takes both copies of the form and leaves a hundred
+    // thousand operands makes the clean-up scan them all for the form. The
+    // scan is charged to --max-steps before each chunk of it is read, so a
+    // loop of such forms stops after a few dozen, not after thousands.
     let mut it = limited(Limits::none().with_max_steps(30_000));
     it.run_str(&format!(
-        "{F} F /PaintProc {{ pop pop pop 100000 {{ 1 }} repeat }} put F"
+        "{F} F /PaintProc {{ pop pop 100000 array aload pop }} put /n 0 def"
     ))
     .expect("setup");
-    let before = it.run_str("{ 7 7 execform } loop");
-    assert_eq!(before, Err(PsError::StepsExceeded));
+    assert_eq!(
+        it.run_str("{ /n n 1 add def F execform } loop"),
+        Err(PsError::StepsExceeded)
+    );
     assert_eq!(it.gsave_depth(), 0);
+    it.set_limits(Limits::none()).expect("no limit");
+    it.capture_stdout();
+    it.run_str("n =").expect("n");
+    let n: u64 = String::from_utf8_lossy(it.captured_stdout())
+        .trim()
+        .parse()
+        .expect("a count");
+    assert!((2..100).contains(&n), "{n} forms before the limit");
 }
