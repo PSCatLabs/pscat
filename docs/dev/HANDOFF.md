@@ -3060,6 +3060,10 @@ renders eight examples in both and compares block-downsampled output).
   nothing to win (`notes/318-bind-drychalk.md`). drycharcoal is bound too, but
   it gains little: 0.4% of the instructions on its specimen and, in one
   pair of runs, 3% on the Lincoln portrait in gs (`notes/326-bind-drycharcoal.md`).
+- The retro bitmap faces (`lib/fonts/{phosphor,pinpoint,diode7,diode5}.ps`)
+  leave exactly one name in the current dictionary, `pf-variant` (#1492):
+  psanim calls it by that name from a private dictionary, so its name, form
+  and place stay; `tests/retro_fonts.rs` checks nothing else leaks.
 - Test Interps at 100×100; golden runs at 500×500/r72. Metric
   assertions use 1e-3 tolerances where the pen is f32.
 - **Program output goes through `Interp::write_stdout`** (#252), not

@@ -258,7 +258,32 @@ data is public: `/Diode5 findfont /Bitmaps get /A get` is the A's rows, top to
 bottom, `#` lit and `.` dark, for a program that drives a real LED grid or
 writes a frame at grid size. Look a character up through the font's `/Encoding`
 (code, then glyph name, then `/Bitmaps`): `/Diode5` has no lowercase bitmaps,
-its Encoding maps a-z to the capitals. `examples/retro_fonts.ps` is the specimen:
+its Encoding maps a-z to the capitals. `/space` is one row of dark pixels on
+every face, as wide as the face's glyph box: the advance less the dark gap
+after a glyph (the font's `/Gap` on `/Diode7` and `/Diode5`, on `/Phosphor` and
+`/Pinpoint-*` the last of the 8 cell columns, which every glyph but `underscore`
+leaves dark, so 7 there), and a program
+reading the rows needs no special case for it. Each face has a `/FontName`, the name it
+is registered under; a `pf-variant` copy gets its own.
+
+Loading. Run the file before the first `findfont` of one of its faces: a
+`findfont` before it gives the Helvetica substitute under that name, with no
+message, and `FontDirectory /Phosphor known` is then true. Run it once, in a
+program's setup, not per page or animation frame: preparing the glyphs takes
+some milliseconds (about 13 to 30 ms for `phosphor.ps`, measured on a loaded
+machine). A file leaves one name in the dictionary current when it runs,
+`pf-variant`, the stable entry point for making a variant (its name and its
+`/New /Base << dials >> pf-variant` form do not change); its other helpers are
+not left behind. A program with a `pf-variant` of its own runs the file inside
+a dictionary and calls the file's `pf-variant` from there:
+
+```postscript
+/fontlib 10 dict def
+fontlib begin (lib/fonts/phosphor.ps) run end
+/Green-Round /Phosphor << /DotShape /round >> fontlib /pf-variant get exec
+```
+
+`examples/retro_fonts.ps` is the specimen:
 
 <p><img src="../dev/design/retro_fonts/specimen.png" width="60%" alt="Every glyph of /Phosphor, /Pinpoint-Draft, /Pinpoint-NLQ, /Diode7 and /Diode5, magnified and at true size"/></p>
 
